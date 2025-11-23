@@ -1,4 +1,4 @@
-import axios, { InternalAxiosRequestConfig } from 'axios';
+import axios, { type InternalAxiosRequestConfig } from 'axios';
 
 const API = axios.create({
     baseURL: 'http://localhost:3000/api/auth'
