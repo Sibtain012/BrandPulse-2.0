@@ -201,7 +201,7 @@ export const forgotPassword = async (req, res) => {
             [userId, tokenHash]
         );
 
-        const resetUrl = `http://localhost:3000/reset-password?token=${resetToken}&id=${userId}`;
+        const resetUrl = `http://localhost:5173/reset-password?token=${resetToken}&id=${userId}`;
 
         const message = `
             <h1>You have requested a password reset</h1>
@@ -229,17 +229,17 @@ export const forgotPassword = async (req, res) => {
     }
 };
 
-// 5. RESET PASSWORD
+// 5. RESET PASSWORD (Updated with "Same Password" Check)
 export const resetPassword = async (req, res) => {
     try {
         const { userId, token, newPassword } = req.body;
 
-        // --- 1. VALIDATION (New) ---
+        // --- 1. VALIDATION ---
         if (!userId || !token || !newPassword) {
             return res.status(400).json({ msg: "Invalid request data" });
         }
 
-        // Enforce the same security policy as Registration
+        // Enforce minimum length
         if (newPassword.length < 8) {
             return res.status(400).json({ msg: "Password must be at least 8 characters" });
         }
@@ -257,13 +257,31 @@ export const resetPassword = async (req, res) => {
             return res.status(400).json({ msg: "Invalid or expired reset link" });
         }
 
-        // --- 3. VERIFY TOKEN MATCH ---
+        // --- 3. NEW CHECK: PREVENT SAME PASSWORD ---
+        // Fetch the user's current password hash
+        const userRes = await pool.query('SELECT password_hash FROM auth_identities WHERE user_id = $1', [userId]);
+
+        if (userRes.rows.length === 0) {
+            return res.status(404).json({ msg: "User not found" });
+        }
+
+        const currentHash = userRes.rows[0].password_hash;
+
+        // Compare new password against the old hash
+        const isSameAsOld = await bcrypt.compare(newPassword, currentHash);
+
+        if (isSameAsOld) {
+            return res.status(400).json({ msg: "New password cannot be the same as your old password" });
+        }
+        // -------------------------------------------
+
+        // --- 4. VERIFY TOKEN MATCH ---
         const dbTokenHash = tokenRes.rows[0].token_hash;
         const isMatch = await bcrypt.compare(token, dbTokenHash);
 
         if (!isMatch) return res.status(400).json({ msg: "Invalid token" });
 
-        // --- 4. UPDATE PASSWORD ---
+        // --- 5. UPDATE PASSWORD ---
         const salt = await bcrypt.genSalt(10);
         const hash = await bcrypt.hash(newPassword, salt);
 
@@ -272,11 +290,11 @@ export const resetPassword = async (req, res) => {
             [hash, userId]
         );
 
-        // --- 5. CLEANUP (Revoke Token) ---
+        // --- 6. CLEANUP (Revoke Token) ---
         await pool.query('DELETE FROM verification_tokens WHERE token_id = $1', [tokenRes.rows[0].token_id]);
 
-        // (Optional) Audit Log
-        // logAudit(userId, 'PASSWORD_RESET', 'Password changed successfully', req.ip);
+        // Audit Log
+        logAudit(userId, 'PASSWORD_RESET', 'Password changed successfully', req.ip);
 
         res.json({ msg: "Password updated successfully" });
 
@@ -339,3 +357,68 @@ export const verify2FA = async (req, res) => {
         res.status(500).send("Server Error");
     }
 };
+
+// 8. UPDATE PROFILE (Name only for now)
+export const updateProfile = async (req, res) => {
+    try {
+        const { fullName } = req.body;
+        const userId = req.user.user_id;
+
+        if (!fullName) return res.status(400).json({ msg: "Name is required" });
+
+        // Update the profile
+        await pool.query(
+            'UPDATE user_profiles SET full_name = $1 WHERE user_id = $2 AND is_current = TRUE',
+            [fullName, userId]
+        );
+
+        res.json({ msg: "Profile updated successfully" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Server Error");
+    }
+};
+
+// 9. CHANGE PASSWORD (Logged In Mode)
+export const changePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword } = req.body;
+        const userId = req.user.user_id;
+
+        // === NEW CHECK: Prevent Same Password ===
+        if (currentPassword === newPassword) {
+            return res.status(400).json({ msg: "New password cannot be the same as the current password" });
+        }
+
+        // 1. Get current hash
+        const userRes = await pool.query('SELECT password_hash FROM auth_identities WHERE user_id = $1', [userId]);
+        const currentHash = userRes.rows[0].password_hash;
+
+        // 2. Verify Old Password
+        const isMatch = await bcrypt.compare(currentPassword, currentHash);
+        if (!isMatch) return res.status(400).json({ msg: "Incorrect current password" });
+
+        // 3. Validate New Password
+        if (newPassword.length < 8) return res.status(400).json({ msg: "New password must be 8+ chars" });
+
+        // 4. Hash & Update
+        const salt = await bcrypt.genSalt(10);
+        const hash = await bcrypt.hash(newPassword, salt);
+
+        await pool.query(
+            'UPDATE auth_identities SET password_hash = $1, password_changed_at = NOW() WHERE user_id = $2',
+            [hash, userId]
+        );
+
+        // Optional: Log Audit
+        await pool.query(`INSERT INTO audit_logs (user_id, action, ip_address) VALUES ($1, 'PASSWORD_CHANGE', $2)`, [userId, req.ip]);
+
+        res.json({ msg: "Password changed successfully" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).send("Server Error");
+    }
+};
+
+
+// I have to [Task Name]. Break this down into a checklist of micro-steps so small I cannot fail. Identify dependencies.

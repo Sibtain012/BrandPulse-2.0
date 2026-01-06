@@ -32,6 +32,7 @@ const ForgotPassword = () => {
             <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-light-100 to-accent-teal-light/5 pointer-events-none" />
 
             <div className="relative w-full max-w-md animate-fade-in">
+                {/* Header */}
                 <div className="text-center mb-8">
                     <div className="inline-flex items-center gap-2 mb-4">
                         <TrendingUp className="w-8 h-8 text-brand-600" />
@@ -42,17 +43,19 @@ const ForgotPassword = () => {
 
                 <form onSubmit={handleSubmit} className="card p-8 space-y-6 animate-slide-up">
                     {status === 'success' ? (
+                        // Success View
                         <div className="flex flex-col items-center text-center space-y-4 py-4">
-                            <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center text-green-600">
-                                <CheckCircle className="w-6 h-6" />
+                            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center text-green-600 border-4 border-white shadow-sm">
+                                <CheckCircle className="w-8 h-8" />
                             </div>
                             <div className="space-y-1">
-                                <h3 className="text-lg font-medium text-light-900">Check your email</h3>
+                                <h3 className="text-lg font-semibold text-light-900">Check your email</h3>
                                 <p className="text-light-600 text-sm">{message}</p>
                             </div>
                             <Link to="/login" className="btn btn-primary w-full mt-4">Return to Login</Link>
                         </div>
                     ) : (
+                        // Form View
                         <>
                             {status === 'error' && (
                                 <div className="alert alert-error">
@@ -82,7 +85,7 @@ const ForgotPassword = () => {
                             </button>
 
                             <div className="text-center pt-2">
-                                <Link to="/login" className="inline-flex items-center gap-2 text-sm text-light-600 hover:text-brand-600 transition-colors">
+                                <Link to="/login" className="inline-flex items-center gap-2 text-sm text-light-600 hover:text-brand-600 font-medium transition-colors">
                                     <ArrowLeft className="w-4 h-4" /> Back to Login
                                 </Link>
                             </div>

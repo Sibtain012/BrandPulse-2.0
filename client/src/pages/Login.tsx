@@ -1,6 +1,6 @@
 import { useState, type ChangeEvent, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, AlertCircle, TrendingUp, ShieldCheck, ArrowLeft } from 'lucide-react';
+import { Mail, Lock, AlertCircle, TrendingUp, Eye, EyeOff, ShieldCheck, ArrowLeft } from 'lucide-react'; // Added Eye/EyeOff
 import API from '../utils/api';
 import axios from 'axios';
 
@@ -14,6 +14,9 @@ const Login = () => {
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
 
+    // NEW: Password Visibility State
+    const [showPassword, setShowPassword] = useState(false);
+
     // --- HANDLERS ---
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
         setFormData({ ...formData, [e.target.id]: e.target.value });
@@ -25,26 +28,18 @@ const Login = () => {
         setIsSubmitting(true);
 
         try {
-            // Prepare payload: If step 2, include the token
-            const payload = step === '2fa'
-                ? { ...formData, token: twoFaCode }
-                : formData;
-
+            const payload = step === '2fa' ? { ...formData, token: twoFaCode } : formData;
             const res = await API.post('/login', payload);
 
-            // --- LOGIC BRANCHING ---
-
-            // Case A: Server asks for 2FA
             if (res.data.is2fa) {
-                setStep('2fa'); // Switch UI to Step 2
+                setStep('2fa');
                 setIsSubmitting(false);
                 return;
             }
 
-            // Case B: Success (Token Received)
             localStorage.setItem('accessToken', res.data.accessToken);
             localStorage.setItem('refreshToken', res.data.refreshToken);
-            navigate('/dashboard', { replace: true });
+            navigate('/', { replace: true });
 
         } catch (err) {
             if (axios.isAxiosError(err) && err.response) {
@@ -74,7 +69,6 @@ const Login = () => {
 
                 <form onSubmit={handleSubmit} className="card p-8 space-y-6 animate-slide-up">
 
-                    {/* Dynamic Title */}
                     <div className="space-y-2">
                         <h2 className="text-2xl font-semibold text-light-900">
                             {step === 'credentials' ? 'Welcome Back' : 'Two-Factor Authentication'}
@@ -121,15 +115,30 @@ const Login = () => {
                                 </div>
                                 <div className="relative">
                                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-light-400" />
+
+                                    {/* Password Input with Toggle Logic */}
                                     <input
                                         id="password"
-                                        type="password"
+                                        type={showPassword ? "text" : "password"} // Dynamic Type
                                         placeholder="••••••••"
                                         value={formData.password}
                                         onChange={handleChange}
-                                        className="input pl-10"
+                                        className="input pl-10 pr-10" // Added pr-10 so text doesn't hide behind icon
                                         required
                                     />
+
+                                    {/* Toggle Button */}
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowPassword(!showPassword)}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-light-400 hover:text-brand-600 focus:outline-none transition-colors"
+                                    >
+                                        {showPassword ? (
+                                            <EyeOff className="w-5 h-5" />
+                                        ) : (
+                                            <Eye className="w-5 h-5" />
+                                        )}
+                                    </button>
                                 </div>
                             </div>
                         </>
@@ -163,7 +172,6 @@ const Login = () => {
                         </div>
                     )}
 
-                    {/* Submit Button */}
                     <button type="submit" disabled={isSubmitting} className="btn btn-primary w-full">
                         {isSubmitting ? 'Verifying...' : (step === 'credentials' ? 'Sign In' : 'Verify Code')}
                     </button>
@@ -179,7 +187,7 @@ const Login = () => {
                 </form>
 
                 <p className="text-center text-xs text-light-500 mt-8">
-                    Protected by enterprise-grade security
+                    Protected by BrandPulse security
                 </p>
             </div>
         </div>

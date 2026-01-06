@@ -1,26 +1,45 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
-import Register from './pages/Registration'; // Create this similarly to Login
-// import Dashboard from '../pages/Dashboard'; // Create this simple component
-
-// Placeholder Dashboard for testing
-const Dashboard = () => <h1>Welcome to BrandPulse Dashboard</h1>;
-// const Register = () => <h1>Register Page (TODO)</h1>;
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import Register from './pages/Registration';
+import Profile from './pages/Profile';
+import Landing from './pages/Landing';
+import SentimentAnalysis from './pages/SentimentAnalysis';
+import History from './pages/History';
 
 function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/register" element={<Register />} />
+        {/* Public Routes */}
+        <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
-        <Route path="/dashboard" element={
+        {/* Protected Routes - Require Authentication */}
+        <Route path="/sentiment-analysis" element={
           <ProtectedRoute>
-            <Dashboard />
+            <SentimentAnalysis />
           </ProtectedRoute>
         } />
 
+        <Route path="/history" element={
+          <ProtectedRoute>
+            <History />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/profile" element={
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        } />
+
+        {/* Default Redirect */}
         <Route path="/" element={<Login />} />
       </Routes>
     </Router>
