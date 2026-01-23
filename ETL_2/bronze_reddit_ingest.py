@@ -159,6 +159,7 @@ def ingest_keyword(row_or_keyword, request_id=None):
     skipped_non_english = 0
     skipped_nsfw = 0
     errors = 0
+    inserted = 0  # Initialize to avoid undefined variable error in exception handler
 
     print(f"[BRONZE] Ingesting keyword: {keyword}")
 

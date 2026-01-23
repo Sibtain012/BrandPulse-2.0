@@ -7,6 +7,7 @@ import {
 import API from '../utils/api';
 import axios from 'axios';
 import Header from '../components/Header';
+import OTPInput from '../components/OTPInput';
 
 interface UserProfile {
     full_name: string;
@@ -31,10 +32,12 @@ const Profile = () => {
     const [showCurrentPass, setShowCurrentPass] = useState(false);
     const [showNewPass, setShowNewPass] = useState(false);
 
-    // --- 2FA STATE ---
+    // --- 2FA STATE (Email OTP) ---
     const [show2FASetup, setShow2FASetup] = useState(false);
-    const [qrCode, setQrCode] = useState('');
-    const [verifyCode, setVerifyCode] = useState('');
+    const [otpSent, setOtpSent] = useState(false);
+    const [maskedEmail, setMaskedEmail] = useState('');
+    const [resendCooldown, setResendCooldown] = useState(0);
+    const [setup2FALoading, setSetup2FALoading] = useState(false);
 
     // 1. Fetch Data
     useEffect(() => {
@@ -108,30 +111,79 @@ const Profile = () => {
         }
     };
 
-    // 4. 2FA Logic
+    // 4. 2FA Logic (Email OTP)
     const start2FASetup = async () => {
+        setSetup2FALoading(true);
         try {
             const res = await API.post('/2fa/setup');
-            setQrCode(res.data.qrImage);
+            setOtpSent(true);
+            setMaskedEmail(res.data.email);
             setShow2FASetup(true);
-            setMessage({ type: '', text: '' }); // Clear previous messages
+            // Start 60-second cooldown immediately when OTP is sent
+            setResendCooldown(60);
+            setMessage({ type: 'success', text: res.data.msg });
         } catch (err) {
-            setMessage({ type: 'error', text: 'Failed to initialize 2FA' });
+            if (axios.isAxiosError(err) && err.response) {
+                setMessage({ type: 'error', text: err.response.data.msg || 'Failed to send OTP' });
+            }
+        } finally {
+            setSetup2FALoading(false);
         }
     };
 
-    const verify2FA = async () => {
+    const handleVerifyOTP = async (otp: string) => {
+        console.log('[Profile 2FA] Verifying OTP:', otp);
+        setMessage({ type: '', text: '' }); // Clear previous messages
+
         try {
-            await API.post('/2fa/verify', { token: verifyCode });
-            setUser(prev => prev ? { ...prev, is_2fa_enabled: true } : null);
+            console.log('[Profile 2FA] Sending request to /2fa/verify');
+            const response = await API.post('/2fa/verify', { otp });
+            console.log('[Profile 2FA] Response:', response.data);
+
+            // Close the setup wizard
             setShow2FASetup(false);
-            setMessage({ type: 'success', text: '2FA Enabled Successfully!' });
+            setOtpSent(false);
+
+            // Refresh user profile to get updated is_2fa_enabled status
+            await fetchProfile();
+
+            // Show success message
+            setMessage({ type: 'success', text: '2FA Enabled Successfully! Your account is now more secure.' });
+
+            // Scroll to top to see the message
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (err) {
+            console.error('[Profile 2FA] Error:', err);
             if (axios.isAxiosError(err) && err.response) {
-                setMessage({ type: 'error', text: err.response.data.msg || 'Invalid 2FA Code' });
+                console.error('[Profile 2FA] Error response:', err.response.data);
+                setMessage({ type: 'error', text: err.response.data.msg || 'Invalid OTP code' });
+            } else {
+                setMessage({ type: 'error', text: 'Failed to verify OTP. Please try again.' });
             }
         }
     };
+
+    const handleResendOTP = async () => {
+        if (resendCooldown > 0) return;
+
+        try {
+            const res = await API.post('/2fa/setup');
+            setMessage({ type: 'success', text: res.data.msg });
+            setResendCooldown(60);
+        } catch (err) {
+            if (axios.isAxiosError(err) && err.response) {
+                setMessage({ type: 'error', text: err.response.data.msg || 'Failed to resend OTP' });
+            }
+        }
+    };
+
+    // Resend cooldown timer
+    useEffect(() => {
+        if (resendCooldown > 0) {
+            const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [resendCooldown]);
 
     if (loading) return <div className="min-h-screen flex items-center justify-center text-brand-600 font-sans">Loading...</div>;
 
@@ -240,7 +292,7 @@ const Profile = () => {
                                             <div className="relative">
                                                 <input
                                                     type={showCurrentPass ? "text" : "password"}
-                                                    className="input pr-10"
+                                                    className="input pl-3 pr-10"
                                                     placeholder="••••••••"
                                                     value={passData.current}
                                                     onChange={(e) => setPassData({ ...passData, current: e.target.value })}
@@ -258,7 +310,7 @@ const Profile = () => {
                                             <div className="relative">
                                                 <input
                                                     type={showNewPass ? "text" : "password"}
-                                                    className="input pr-10"
+                                                    className="input pl-3 pr-10"
                                                     placeholder="Min 8 chars"
                                                     value={passData.new}
                                                     onChange={(e) => setPassData({ ...passData, new: e.target.value })}
@@ -279,75 +331,94 @@ const Profile = () => {
                                 </form>
                             </div>
 
-                            {/* 2FA Section */}
-                            <div className="card p-6">
-                                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-light-100">
-                                    <div className="p-2 bg-accent-teal-light/10 rounded-lg text-accent-teal-dark">
-                                        <Shield className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-lg font-bold text-light-900">Two-Factor Authentication</h3>
-                                        <p className="text-xs text-light-500">Add an extra layer of security</p>
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center justify-between bg-light-50 p-4 rounded-xl border border-light-200">
-                                    <div className="flex gap-4 items-center">
-                                        <div className={`p-3 rounded-full ${user?.is_2fa_enabled ? 'bg-green-100 text-green-600' : 'bg-light-200 text-light-400'}`}>
-                                            <Smartphone className="w-6 h-6" />
+                            {/* 2FA Section - Only show if NOT enabled */}
+                            {!user?.is_2fa_enabled && (
+                                <div className="card p-6">
+                                    <div className="flex items-center gap-3 mb-6 pb-4 border-b border-light-100">
+                                        <div className="p-2 bg-accent-teal-light/10 rounded-lg text-accent-teal-dark">
+                                            <Shield className="w-5 h-5" />
                                         </div>
                                         <div>
-                                            <h4 className="font-medium text-light-900">Authenticator App</h4>
-                                            <p className="text-xs text-light-500">
-                                                {user?.is_2fa_enabled ? "Active and securing your account." : "Not configured yet."}
-                                            </p>
+                                            <h3 className="text-lg font-bold text-light-900">Two-Factor Authentication</h3>
+                                            <p className="text-xs text-light-500">Add an extra layer of security</p>
                                         </div>
                                     </div>
 
-                                    {user?.is_2fa_enabled ? (
-                                        <span className="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 text-xs font-bold uppercase tracking-wide rounded-full border border-green-200">
-                                            <CheckCircle className="w-3 h-3" /> Enabled
-                                        </span>
-                                    ) : (
-                                        !show2FASetup && (
-                                            <button onClick={start2FASetup} className="btn btn-primary text-sm">
-                                                Setup 2FA
+                                    {!show2FASetup ? (
+                                        <div className="flex items-center justify-between bg-light-50 p-4 rounded-xl border border-light-200">
+                                            <div className="flex gap-4 items-center">
+                                                <div className="p-3 rounded-full bg-light-200 text-light-400">
+                                                    <Mail className="w-6 h-6" />
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-medium text-light-900">Email OTP</h4>
+                                                    <p className="text-xs text-light-500">
+                                                        Secure your account with email verification codes
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <button
+                                                onClick={start2FASetup}
+                                                disabled={setup2FALoading || show2FASetup}
+                                                className="btn btn-primary text-sm"
+                                            >
+                                                {setup2FALoading ? 'Sending...' : 'Enable 2FA'}
                                             </button>
-                                        )
+                                        </div>
+                                    ) : (
+                                        <div className="mt-6 p-6 bg-light-50 rounded-xl border border-light-200 animate-fade-in">
+                                            <h5 className="font-bold text-light-900 mb-4">Enable Two-Factor Authentication</h5>
+
+                                            {/* Email Notification */}
+                                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                                                <div className="flex items-start gap-3">
+                                                    <Mail className="w-5 h-5 text-blue-600 mt-0.5" />
+                                                    <div>
+                                                        <p className="text-blue-800 font-medium">📧 Check Your Email</p>
+                                                        <p className="text-sm text-blue-600 mt-1">
+                                                            We sent a 6-digit verification code to <strong>{user?.email}</strong>
+                                                        </p>
+                                                        <p className="text-xs text-blue-500 mt-2">
+                                                            The code will expire in 1 minute.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-4">
+                                                <div>
+                                                    <label className="block text-sm font-medium text-light-700 mb-3">
+                                                        Enter Verification Code
+                                                    </label>
+                                                    <OTPInput onComplete={handleVerifyOTP} />
+                                                </div>
+
+                                                {/* Resend Button */}
+                                                <div className="text-center">
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleResendOTP}
+                                                        disabled={resendCooldown > 0}
+                                                        className="text-sm text-brand-600 hover:text-brand-700 font-medium disabled:text-light-400 disabled:cursor-not-allowed"
+                                                    >
+                                                        {resendCooldown > 0
+                                                            ? `Resend code in ${resendCooldown}s`
+                                                            : 'Resend verification code'}
+                                                    </button>
+                                                </div>
+
+                                                <button
+                                                    onClick={() => setShow2FASetup(false)}
+                                                    className="text-xs text-light-500 hover:text-accent-red-dark underline"
+                                                >
+                                                    Cancel Setup
+                                                </button>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
+                            )}
 
-                                {/* 2FA Wizard */}
-                                {show2FASetup && (
-                                    <div className="mt-6 p-6 bg-light-50 rounded-xl border border-light-200 animate-fade-in">
-                                        <h5 className="font-bold text-light-900 mb-4">Configure Authenticator</h5>
-                                        <div className="flex flex-col md:flex-row gap-8">
-                                            <div className="bg-white p-2 rounded-lg shadow-sm border border-light-200 w-fit mx-auto md:mx-0">
-                                                <img src={qrCode} alt="QR Code" className="w-32 h-32" />
-                                            </div>
-                                            <div className="flex-1 space-y-4">
-                                                <ol className="list-decimal list-inside text-sm text-light-600 space-y-2">
-                                                    <li>Open <strong>Google Authenticator</strong> on your phone.</li>
-                                                    <li>Scan the QR image shown on the left.</li>
-                                                    <li>Enter the 6-digit code below to verify.</li>
-                                                </ol>
-                                                <div className="flex gap-3 max-w-xs">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="123 456"
-                                                        className="input text-center tracking-[0.5em] font-mono text-lg"
-                                                        maxLength={6}
-                                                        value={verifyCode}
-                                                        onChange={(e) => setVerifyCode(e.target.value)}
-                                                    />
-                                                    <button onClick={verify2FA} className="btn btn-primary">Verify</button>
-                                                </div>
-                                                <button onClick={() => setShow2FASetup(false)} className="text-xs text-light-500 hover:text-accent-red-dark underline">Cancel Setup</button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
                         </div>
                     </div>
                 </div>

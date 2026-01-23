@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Lock, CheckCircle, AlertCircle, TrendingUp, Eye, EyeOff } from 'lucide-react';
 import API from '../utils/api';
@@ -16,6 +16,14 @@ const ResetPassword = () => {
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [message, setMessage] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+
+    // Validate token presence on mount
+    useEffect(() => {
+        if (!token || !userId) {
+            setStatus('error');
+            setMessage('Invalid or missing reset link. Please request a new one from the forgot password page.');
+        }
+    }, [token, userId]);
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();

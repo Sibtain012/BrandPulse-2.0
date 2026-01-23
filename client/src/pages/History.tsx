@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getCurrentUserId } from '../utils/auth';
+import Header from '../components/Header';
 
 interface AnalysisHistory {
     history_id: number;
@@ -16,7 +17,27 @@ interface AnalysisHistory {
     avg_sentiment_score: number;
     request_id: number;
     analysis_timestamp: string;
+    platform_id?: number; // 1 = Reddit, 2 = Twitter
 }
+
+// Platform icon component
+const PlatformIcon: React.FC<{ platformId?: number }> = ({ platformId }) => {
+    if (platformId === 2) {
+        return (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
+                <span>🐦</span>
+                <span>Twitter</span>
+            </span>
+        );
+    }
+    // Default to Reddit (platformId === 1 or undefined)
+    return (
+        <span className="inline-flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-medium">
+            <span>🔴</span>
+            <span>Reddit</span>
+        </span>
+    );
+};
 
 const History = () => {
     const [analyses, setAnalyses] = useState<AnalysisHistory[]>([]);
@@ -101,8 +122,9 @@ const History = () => {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 py-8 px-4">
-            <div className="max-w-7xl mx-auto">
+        <div className="pt-15">
+            <Header />
+            <div className="p-6 md:p-10 max-w-7xl mx-auto">
                 {/* Header */}
                 <div className="mb-8">
                     <h1 className="text-3xl font-bold text-gray-900 mb-2">Analysis History</h1>
@@ -147,7 +169,7 @@ const History = () => {
 
                 {/* History Cards */}
                 {analyses.length === 0 ? (
-                    <div className="text-center py-12 bg-white rounded-lg shadow">
+                    <div className="text-center py-12 bg-white rounded-md shadow">
                         <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
@@ -174,9 +196,12 @@ const History = () => {
                                 >
                                     {/* Keyword Header */}
                                     <div className="mb-4">
-                                        <h3 className="text-xl font-semibold text-gray-900 mb-1">
-                                            {analysis.keyword}
-                                        </h3>
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="text-xl font-semibold text-gray-900">
+                                                {analysis.keyword}
+                                            </h3>
+                                            <PlatformIcon platformId={analysis.platform_id} />
+                                        </div>
                                         <p className="text-sm text-gray-500">
                                             {formatDate(analysis.analysis_timestamp)}
                                         </p>
@@ -251,6 +276,7 @@ const History = () => {
                 )}
             </div>
         </div>
+
     );
 };
 

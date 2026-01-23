@@ -1,8 +1,9 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useState, useEffect, type ChangeEvent, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, AlertCircle, TrendingUp, Eye, EyeOff, ShieldCheck, ArrowLeft } from 'lucide-react'; // Added Eye/EyeOff
+import { Mail, Lock, AlertCircle, TrendingUp, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import API from '../utils/api';
 import axios from 'axios';
+import OTPInput from '../components/OTPInput';
 
 const Login = () => {
     const navigate = useNavigate();
@@ -10,12 +11,10 @@ const Login = () => {
     // --- STATE ---
     const [step, setStep] = useState<'credentials' | '2fa'>('credentials');
     const [formData, setFormData] = useState({ email: '', password: '' });
-    const [twoFaCode, setTwoFaCode] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
-
-    // NEW: Password Visibility State
     const [showPassword, setShowPassword] = useState(false);
+    const [resendCooldown, setResendCooldown] = useState(0);
 
     // --- HANDLERS ---
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -28,11 +27,18 @@ const Login = () => {
         setIsSubmitting(true);
 
         try {
-            const payload = step === '2fa' ? { ...formData, token: twoFaCode } : formData;
-            const res = await API.post('/login', payload);
+            const res = await API.post('/login', formData);
 
             if (res.data.is2fa) {
                 setStep('2fa');
+                // Start 60-second cooldown immediately when 2FA OTP is sent
+                setResendCooldown(60);
+                setIsSubmitting(false);
+                return;
+            }
+
+            if (res.data.requiresVerification) {
+                setError('Please verify your email before logging in. Check your inbox for the verification code.');
                 setIsSubmitting(false);
                 return;
             }
@@ -51,6 +57,50 @@ const Login = () => {
             setIsSubmitting(false);
         }
     };
+
+    const handleVerify2FA = async (otp: string) => {
+        setError(null);
+        setIsSubmitting(true);
+
+        try {
+            const res = await API.post('/login', { ...formData, token: otp });
+            localStorage.setItem('accessToken', res.data.accessToken);
+            localStorage.setItem('refreshToken', res.data.refreshToken);
+            navigate('/', { replace: true });
+        } catch (err) {
+            if (axios.isAxiosError(err) && err.response) {
+                setError(err.response.data.msg || 'Invalid OTP code');
+            }
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleResendOTP = async () => {
+        if (resendCooldown > 0) return;
+
+        setError(null);
+        try {
+            // Need to get a new OTP by re-logging in
+            const res = await API.post('/login', formData);
+            if (res.data.is2fa) {
+                setResendCooldown(60); // 60-second cooldown
+                setError(null);
+            }
+        } catch (err) {
+            if (axios.isAxiosError(err) && err.response) {
+                setError(err.response.data.msg || 'Failed to resend code');
+            }
+        }
+    };
+
+    // Cooldown timer
+    useEffect(() => {
+        if (resendCooldown > 0) {
+            const timer = setTimeout(() => setResendCooldown(resendCooldown - 1), 1000);
+            return () => clearTimeout(timer);
+        }
+    }, [resendCooldown]);
 
     // --- UI RENDER ---
     return (
@@ -76,7 +126,7 @@ const Login = () => {
                         <p className="text-light-600 text-sm">
                             {step === 'credentials'
                                 ? 'Sign in to access your analytics dashboard'
-                                : 'Enter the 6-digit code from your authenticator app'}
+                                : 'Enter the 6-digit code sent to your email'}
                         </p>
                     </div>
 
@@ -144,28 +194,54 @@ const Login = () => {
                         </>
                     )}
 
-                    {/* --- STEP 2: 2FA CODE --- */}
+                    {/* --- STEP 2: EMAIL OTP 2FA --- */}
                     {step === '2fa' && (
-                        <div className="space-y-2 animate-fade-in">
-                            <label htmlFor="code" className="label">Authenticator Code</label>
-                            <div className="relative">
-                                <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-brand-600" />
-                                <input
-                                    id="code"
-                                    type="text"
-                                    placeholder="123 456"
-                                    value={twoFaCode}
-                                    onChange={(e) => setTwoFaCode(e.target.value)}
-                                    className="input pl-10 text-lg tracking-widest font-mono"
-                                    maxLength={6}
-                                    autoFocus
-                                    required
-                                />
+                        <div className="space-y-4 animate-fade-in">
+                            {/* Email Notification */}
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                <div className="flex items-start gap-3">
+                                    <Mail className="w-5 h-5 text-blue-600 mt-0.5" />
+                                    <div>
+                                        <p className="text-blue-800 font-medium">📧 Check Your Email</p>
+                                        <p className="text-sm text-blue-600 mt-1">
+                                            We sent a 6-digit verification code to <strong>{formData.email}</strong>
+                                        </p>
+                                        <p className="text-xs text-blue-500 mt-2">
+                                            The code will expire in 1 minute.
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
+
+                            {/* OTP Input */}
+                            <div>
+                                <label className="block text-sm font-medium text-light-700 mb-3">
+                                    Enter Verification Code
+                                </label>
+                                <OTPInput onComplete={handleVerify2FA} />
+                            </div>
+
+                            {/* Resend Button */}
+                            <div className="text-center">
+                                <button
+                                    type="button"
+                                    onClick={handleResendOTP}
+                                    disabled={resendCooldown > 0}
+                                    className="text-sm text-brand-600 hover:text-brand-700 font-medium disabled:text-light-400 disabled:cursor-not-allowed"
+                                >
+                                    {resendCooldown > 0
+                                        ? `Resend code in ${resendCooldown}s`
+                                        : 'Resend verification code'}
+                                </button>
+                            </div>
+
                             <button
                                 type="button"
-                                onClick={() => setStep('credentials')}
-                                className="text-xs text-light-500 hover:text-brand-600 flex items-center gap-1 mt-2"
+                                onClick={() => {
+                                    setStep('credentials');
+                                    setError(null);
+                                }}
+                                className="text-xs text-light-500 hover:text-brand-600 flex items-center gap-1 mx-auto"
                             >
                                 <ArrowLeft className="w-3 h-3" /> Back to login
                             </button>

@@ -1,18 +1,28 @@
 import express from 'express';
-import { register, login, logout, forgotPassword, resetPassword, setup2FA, verify2FA, updateProfile, changePassword } from '../controllers/authControllers.js';
-import { verifyToken } from '../middleware/auth.js';
+import { register, login, logout, forgotPassword, resetPassword, setup2FA, verify2FA, updateProfile, changePassword, verifyRegistration, resendRegistrationOTP, resendOTP } from '../controllers/authControllers.js';
+import { verifyToken } from '../middleware/VerifyToken.js';
+import { otpGenerationLimiter, otpVerificationLimiter, otpResendLimiter } from '../middleware/otpLimiter.js';
 import pool from '../db.js';
 
 const router = express.Router();
 
-// Public Routes
-router.post('/register', register);
+// Public Routes - Registration with Email Verification
+router.post('/register', otpGenerationLimiter, register);  // Step 1: Send OTP (rate limited)
+router.post('/verify-registration', otpVerificationLimiter, verifyRegistration);  // Step 2: Verify OTP & Activate
+router.post('/resend-registration-otp', otpResendLimiter, resendRegistrationOTP);  // Resend registration OTP
+
+// Public Routes - Login
 router.post('/login', login);
 router.post('/logout', logout);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
-router.post('/2fa/setup', verifyToken, setup2FA);
-router.post('/2fa/verify', verifyToken, verify2FA);
+
+// 2FA Routes (Protected + Rate Limited)
+router.post('/2fa/setup', verifyToken, otpGenerationLimiter, setup2FA);
+router.post('/2fa/verify', verifyToken, otpVerificationLimiter, verify2FA);
+router.post('/2fa/resend', verifyToken, otpResendLimiter, resendOTP); // Resend login OTP
+
+// Profile Routes (Protected)
 router.put('/profile', verifyToken, updateProfile);
 router.put('/change-password', verifyToken, changePassword);
 

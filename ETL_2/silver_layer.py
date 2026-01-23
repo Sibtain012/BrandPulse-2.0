@@ -306,18 +306,204 @@ def run_silver(request_id, batch_size=50):
 
     finally:
         cursor_pg.close()
+
+
+# =====================================================
+# TWITTER PROCESSING
+# =====================================================
+def get_platform_id(platform_name: str) -> int:
+    """Get platform_id from dim_platform table."""
+    cursor = pg_conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT platform_id FROM dim_platform WHERE platform_name = %s",
+            (platform_name,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result else None
+    finally:
+        cursor.close()
+
+
+def clean_tweet_text(text: str) -> str:
+    """Clean tweet text by removing URLs, mentions, and extra whitespace."""
+    if not text:
+        return ""
+    
+    # Remove URLs
+    text = re.sub(r'http\S+|www\S+', '', text)
+    # Remove mentions (@username)
+    text = re.sub(r'@\w+', '', text)
+    # Remove hashtags but keep the text
+    text = re.sub(r'#(\w+)', r'\1', text)
+    # Normalize whitespace
+    text = WHITESPACE_PATTERN.sub(" ", text)
+    return text.strip()
+
+
+def process_twitter_data(request_id: int, batch_size: int = 50):
+    """
+    Process Twitter data from MongoDB bronze layer:
+    1. Clean tweet text
+    2. Run RoBERTa sentiment analysis
+    3. Persist to silver_twitter_tweets table
+    """
+    cursor_pg = pg_conn.cursor()
+    processed_mongo_ids = []
+    
+    try:
+        rid = int(request_id) if request_id else None
+        if rid is None:
+            print("[SILVER TWITTER] CRITICAL: No Request ID provided. Aborting.")
+            return
+    except (TypeError, ValueError):
+        print(f"[SILVER TWITTER] CRITICAL: Invalid Request ID format: {request_id}")
+        return
+    
+    # Get platform_id for Twitter
+    platform_id = get_platform_id('twitter')
+    if not platform_id:
+        print("[SILVER TWITTER] ERROR: Twitter platform not found in dim_platform")
+        return
+    
+    # Fetch unprocessed Twitter documents
+    bronze_twitter = bronze_db["bronze_raw_twitter_data"]
+    query_filter = {
+        "silver_processed": {"$ne": True},
+        "global_keyword_id": rid
+    }
+    
+    unprocessed_count = bronze_twitter.count_documents(query_filter)
+    print(f"[SILVER TWITTER] Total Unprocessed for Request {rid}: {unprocessed_count}")
+    
+    raw_docs = list(bronze_twitter.find(query_filter).limit(batch_size))
+    
+    if not raw_docs:
+        print("[SILVER TWITTER] No new Twitter data to process.")
+        cursor_pg.close()
+        return
+    
+    # Collect all tweet texts for batch inference
+    all_texts_to_score = []
+    doc_mapping = []
+    
+    for raw_doc in raw_docs:
+        try:
+            tweet = raw_doc.get("raw_tweet", {})
+            text = clean_tweet_text(tweet.get("text", ""))
+            
+            if not text or len(text) < 10:
+                continue
+            
+            all_texts_to_score.append(text)
+            doc_mapping.append({
+                "mongo_doc": raw_doc,
+                "tweet_data": tweet,
+                "text_clean": text
+            })
+        except Exception as e:
+            print(f"[SILVER TWITTER] Error preparing tweet: {e}")
+            continue
+    
+    if not all_texts_to_score:
+        print("[SILVER TWITTER] No valid tweets to process after cleaning.")
+        cursor_pg.close()
+        return
+    
+    # Batch sentiment inference
+    print(f"[SILVER TWITTER] Running sentiment analysis on {len(all_texts_to_score)} tweets...")
+    all_scores = sentiment_pipeline(all_texts_to_score)
+    
+    # Persist to PostgreSQL
+    try:
+        for idx, item in enumerate(doc_mapping):
+            raw_doc = item["mongo_doc"]
+            tweet = item["tweet_data"]
+            text_clean = item["text_clean"]
+            sentiment = all_scores[idx]
+            
+            # Map sentiment label
+            sentiment_label = LABEL_MAP.get(sentiment["label"], "Neutral")
+            sentiment_score = sentiment["score"]
+            
+            # Build tweet URL
+            tweet_id = tweet.get("tweet_id")
+            author = tweet.get("author", "")
+            tweet_url = f"https://twitter.com/{author}/status/{tweet_id}" if author and tweet_id else None
+            
+            # Insert into silver_twitter_tweets
+            cursor_pg.execute(
+                """
+                INSERT INTO silver_twitter_tweets (
+                    original_bronze_id, keyword, global_keyword_id,
+                    tweet_id, tweet_url, text_clean,
+                    author_hash, author_id_hash,
+                    retweet_count, favorite_count, reply_count, quote_count,
+                    tweet_sentiment_label, tweet_sentiment_score,
+                    tweet_created_at, processed_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (original_bronze_id) DO NOTHING
+                """,
+                (
+                    str(raw_doc["_id"]),
+                    raw_doc.get("keyword"),
+                    rid,
+                    tweet_id,
+                    tweet_url,
+                    text_clean,
+                    hash_author(tweet.get("author")),
+                    hash_author(tweet.get("author_id")),
+                    tweet.get("retweet_count", 0),
+                    tweet.get("favorite_count", 0),
+                    tweet.get("reply_count", 0),
+                    tweet.get("quote_count", 0),
+                    sentiment_label,
+                    sentiment_score,
+                    tweet.get("created_at")
+                )
+            )
+            
+            processed_mongo_ids.append(raw_doc["_id"])
+        
+        # Commit to PostgreSQL
+        pg_conn.commit()
+        
+        # Mark as processed in MongoDB
+        if processed_mongo_ids:
+            bronze_twitter.update_many(
+                {"_id": {"$in": processed_mongo_ids}},
+                {"$set": {"silver_processed": True}}
+            )
+            print(f"[SILVER TWITTER] Committed {len(processed_mongo_ids)} tweets.")
+    
+    except Exception as e:
+        pg_conn.rollback()
+        print(f"[SILVER TWITTER] CRITICAL PERSISTENCE ERROR: {e}")
+        raise e
+    
+    finally:
+        cursor_pg.close()
+
+
 def log_error_to_pg(cursor, bronze_id, keyword, message, trace):
     try:
-        cursor.execute("INSERT INTO silver_errors ...", (bronze_id, keyword, message, trace))
-    except:
-        pass
+        print(f"[SILVER TWITTER ERROR] {e}")
+        traceback.print_exc()
+        raise
+    finally:
+        cursor.close()
 
 
 if __name__ == "__main__":
     import sys
-
-    # Orchestrator passes [keyword, requestId]
-    if len(sys.argv) > 2:
-        run_silver(sys.argv[2])  # sys.argv[2] is the request_id
+    if len(sys.argv) > 1:
+        request_id = int(sys.argv[1])
+        platform = sys.argv[2] if len(sys.argv) > 2 else 'reddit'
+        
+        if platform == 'twitter':
+            process_twitter_data(request_id)
+        else:
+            run_silver(request_id)
     else:
-        print("Usage: python silver_layer.py <keyword> <request_id>")
+        print("Usage: python silver_layer.py <request_id> [platform]")

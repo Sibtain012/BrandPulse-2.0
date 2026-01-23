@@ -10,8 +10,9 @@ export const useAnalysis = () => {
     const startAnalysis = async (
         keyword: string,
         userId: number,
-        startDate?: string | null,
-        endDate?: string | null
+        startDate: string | null = null,
+        endDate: string | null = null,
+        platform: 'reddit' | 'twitter' = 'reddit'
     ) => {
         setStatus('PROCESSING');
         try {
@@ -23,7 +24,8 @@ export const useAnalysis = () => {
                     keyword,
                     user_id: userId,
                     start_date: startDate,
-                    end_date: endDate
+                    end_date: endDate,
+                    platform
                 })
             });
 
