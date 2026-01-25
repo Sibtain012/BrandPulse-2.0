@@ -46,9 +46,9 @@ interface IngestionStats {
 // Sentiment badge component
 const SentimentBadge: React.FC<{ sentiment: string; confidence?: number }> = ({ sentiment, confidence }) => {
     const colors: Record<string, string> = {
-        Positive: 'bg-green-100 text-green-700 border-green-200',
-        Neutral: 'bg-gray-100 text-gray-700 border-gray-200',
-        Negative: 'bg-red-100 text-red-700 border-red-200'
+        Positive: 'bg-accent-green-light/20 text-accent-green-dark border-accent-green-light',
+        Neutral: 'bg-light-100 text-light-700 border-light-200',
+        Negative: 'bg-accent-red-light/20 text-accent-red-dark border-accent-red-light'
     };
     return (
         <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${colors[sentiment] || colors.Neutral}`}>
@@ -67,20 +67,22 @@ const SentimentAnalysis: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'charts' | 'posts' | 'comments'>('charts');
     const [historicalRequestId, setHistoricalRequestId] = useState<number | null>(null);
     const [loadingMessage, setLoadingMessage] = useState<string>('Starting analysis...');
+    const [loadingResults, setLoadingResults] = useState<boolean>(false);
     const { status, startAnalysis, activeRequestId } = useAnalysis();
     const [searchParams] = useSearchParams();
 
     // Fetch sentiment summary data with longer retry logic
     const fetchWithRetry = useCallback(async (rid: number, attempt = 1) => {
         try {
-            // Update loading message based on attempt
+            // Show loading state on first attempt
             if (attempt === 1) {
-                setLoadingMessage('Collecting data from social media...');
+                setLoadingResults(true);
+                setLoadingMessage('Preparing your results...');
                 await new Promise(r => setTimeout(r, 5000));
             } else if (attempt <= 4) {
-                setLoadingMessage('Analyzing sentiment with AI...');
+                setLoadingMessage('Loading analysis data...');
             } else {
-                setLoadingMessage('Finalizing results...');
+                setLoadingMessage('Finalizing charts...');
             }
 
             const res = await axios.get<SentimentResponse>(`/api/data/results/${rid}`);
@@ -89,28 +91,32 @@ const SentimentAnalysis: React.FC = () => {
                 console.log(`✅ Data ready! Posts: ${res.data.totals.posts}, Comments: ${res.data.totals.comments}`);
                 setLoadingMessage('Analysis complete!');
                 setSentimentData(res.data);
+                setLoadingResults(false);
                 // Also fetch detailed data for proof
                 const detailsRes = await axios.get<DetailsResponse>(`/api/data/details/${rid}`);
                 setDetailsData(detailsRes.data);
                 // Fetch ingestion stats from MongoDB
                 const statsRes = await axios.get<IngestionStats>(`/api/data/ingestion-stats/${rid}`);
                 setIngestionStats(statsRes.data);
-            } else if (attempt < 12) { // Increased from 5 to 12 attempts (up to 2 minutes)
+            } else if (attempt < 5) {
                 const delay = attempt * 3000; // Increased delay: 3s, 6s, 9s, 12s, etc.
-                console.warn(`⏳ Data not ready yet. Retry ${attempt}/12 in ${delay / 1000}s... (Request ID: ${rid})`);
+                console.warn(`⏳ Data not ready yet. Retry ${attempt}/5 in ${delay / 1000}s... (Request ID: ${rid})`);
                 setTimeout(() => fetchWithRetry(rid, attempt + 1), delay);
             } else {
                 console.error(`❌ Timeout: No data found after ${attempt} attempts for Request ID: ${rid}`);
                 setSentimentData(null);
                 setDetailsData(null);
                 setIngestionStats(null);
+                setLoadingResults(false);
             }
         } catch (err) {
             console.error("Fetch Error:", err);
-            if (attempt < 12) {
+            if (attempt < 5) {
                 const delay = attempt * 3000;
                 console.warn(`⚠️ Fetch failed, retrying in ${delay / 1000}s...`);
                 setTimeout(() => fetchWithRetry(rid, attempt + 1), delay);
+            } else {
+                setLoadingResults(false);
             }
         }
     }, []);
@@ -135,7 +141,13 @@ const SentimentAnalysis: React.FC = () => {
         setActiveTab('charts');
 
         // Send dates to backend along with keyword and actual user ID (Reddit only)
-        await startAnalysis(keyword, userId, startDate || null, endDate || null, 'reddit');
+        const result = await startAnalysis(keyword, userId, startDate || null, endDate || null, 'reddit');
+
+        // If cached results (≥75% coverage), immediately fetch the data
+        if (result?.cached && result?.requestId) {
+            console.log('📦 Loading cached results with', result.cacheInfo?.coverage.toFixed(1), '% coverage');
+            await fetchWithRetry(result.requestId, 1);
+        }
     };
 
     const handleClearDateFilter = () => {
@@ -214,8 +226,7 @@ const SentimentAnalysis: React.FC = () => {
             <Header />
             <div className="p-6 md:p-10 max-w-7xl mx-auto">
                 <header className="mb-8">
-                    <h1 className="text-3xl font-bold text-gray-800">BrandPulse Sentiment Analyzer</h1>
-                    <p className="text-gray-500">Real-time Reddit sentiment analysis powered by RoBERTa AI (ID: {activeRequestId || 'None'})</p>
+                    <h1 className="text-3xl font-bold text-light-800">BrandPulse Sentiment Analyzer</h1>
                 </header>
 
                 {/* Analysis Form - Hidden when viewing historical data */}
@@ -223,10 +234,10 @@ const SentimentAnalysis: React.FC = () => {
                     <section className="bg-white p-6 rounded-xl shadow-sm border mb-8">
                         <form onSubmit={handleRunPipeline} className="space-y-4">
                             {/* Keyword Input */}
-                            <div className="flex gap-4">
+                            <div className="flex flex-col sm:flex-row gap-4">
                                 <input
                                     type="text"
-                                    className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-brand-500 outline-none w-full"
                                     placeholder="Enter brand or keyword (e.g., iPhone 15, Tesla, Nike)"
                                     value={keyword}
                                     onChange={(e) => setKeyword(e.target.value)}
@@ -234,34 +245,34 @@ const SentimentAnalysis: React.FC = () => {
                                 />
                                 <button
                                     type="submit"
-                                    disabled={status === 'PROCESSING'}
-                                    className="px-8 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:bg-gray-400 transition-all"
+                                    disabled={status === 'PROCESSING' || loadingResults}
+                                    className="w-full sm:w-auto px-8 py-3 bg-brand-600 text-white rounded-lg font-bold hover:bg-brand-700 disabled:bg-light-400 transition-all whitespace-nowrap"
                                 >
-                                    {status === 'PROCESSING' ? 'Analyzing...' : 'Analyze Sentiment'}
+                                    {status === 'PROCESSING' ? 'Analyzing...' : loadingResults ? 'Loading...' : 'Analyze Sentiment'}
                                 </button>
                             </div>
 
                             {/* Date Range Filter - Always visible */}
                             <div className="border-t pt-4">
-                                <div className="flex items-center gap-4 flex-wrap">
-                                    <label className="text-sm font-semibold text-gray-700">
+                                <div className="flex flex-col sm:flex-row sm:items-center gap-4 flex-wrap">
+                                    <label className="text-sm font-semibold text-light-700 w-full sm:w-auto">
                                         📅 Filter by Date Range (Optional):
                                     </label>
-                                    <div className="flex items-center gap-2">
-                                        <label className="text-sm text-gray-600">From:</label>
+                                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                                        <label className="text-sm text-light-600 whitespace-nowrap">From:</label>
                                         <input
                                             type="date"
-                                            className="p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                            className="flex-1 sm:flex-initial p-2 border rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
                                             value={startDate}
                                             onChange={(e) => setStartDate(e.target.value)}
                                             disabled={status === 'PROCESSING'}
                                         />
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        <label className="text-sm text-gray-600">To:</label>
+                                    <div className="flex items-center gap-2 w-full sm:w-auto">
+                                        <label className="text-sm text-light-600 whitespace-nowrap">To:</label>
                                         <input
                                             type="date"
-                                            className="p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                            className="flex-1 sm:flex-initial p-2 border rounded-lg focus:ring-2 focus:ring-brand-500 outline-none text-sm"
                                             value={endDate}
                                             onChange={(e) => setEndDate(e.target.value)}
                                             disabled={status === 'PROCESSING'}
@@ -271,14 +282,14 @@ const SentimentAnalysis: React.FC = () => {
                                         <button
                                             type="button"
                                             onClick={handleClearDateFilter}
-                                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                            className="w-full sm:w-auto px-4 py-2 bg-light-200 text-light-700 rounded-lg text-sm font-medium hover:bg-light-300 transition-colors"
                                             disabled={status === 'PROCESSING'}
                                         >
                                             Clear Dates
                                         </button>
                                     )}
                                 </div>
-                                <p className="text-xs text-gray-500 mt-2">
+                                <p className="text-xs text-light-500 mt-2">
                                     {startDate || endDate
                                         ? `Analysis will filter data from ${startDate || 'beginning'} to ${endDate || 'present'}`
                                         : 'Leave empty to analyze all available data'
@@ -306,18 +317,18 @@ const SentimentAnalysis: React.FC = () => {
 
                 {/* Loading Indicator - Only show when processing */}
                 {status === 'PROCESSING' && (
-                    <div className="text-center py-16 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-200">
-                        <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mb-6"></div>
-                        <p className="text-xl font-semibold text-gray-800 mb-2">{loadingMessage}</p>
-                        <p className="text-sm text-gray-500">This usually takes 30-60 seconds</p>
+                    <div className="text-center py-16 bg-gradient-to-br from-brand-50 to-accent-blue-light/10 rounded-xl border-2 border-brand-200">
+                        <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-brand-500 border-t-transparent mb-6"></div>
+                        <p className="text-xl font-semibold text-light-800 mb-2">{loadingMessage}</p>
+                        <p className="text-sm text-light-500">This usually takes 30-60 seconds</p>
                     </div>
                 )}
 
                 {/* Results Summary - Only show when data exists */}
                 {hasData && (status === 'COMPLETED' || historicalRequestId) && !historicalRequestId && (
-                    <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg mb-6">
-                        <span className="text-green-700">✓</span>
-                        <span className="text-sm text-green-800 font-medium">
+                    <div className="flex items-center gap-2 p-3 bg-accent-green-light/10 border border-accent-green-light/30 rounded-lg mb-6">
+                        <span className="text-accent-green-dark">✓</span>
+                        <span className="text-sm text-accent-green-dark font-medium">
                             Analysis complete: {sentimentData.totals.posts} posts • {sentimentData.totals.comments} comments
                         </span>
                     </div>
@@ -327,50 +338,50 @@ const SentimentAnalysis: React.FC = () => {
                 {(status === 'COMPLETED' || historicalRequestId) && hasData ? (
                     <div className="space-y-8">
                         {/* Summary Stats */}
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-xl text-white">
-                                <p className="text-blue-100 text-sm font-medium">Total Analyzed</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="bg-gradient-to-br from-brand-500 to-brand-600 p-6 rounded-xl text-white">
+                                <p className="text-brand-100 text-sm font-medium">Total Analyzed</p>
                                 <p className="text-4xl font-bold">{sentimentData.totals.total}</p>
-                                <p className="text-blue-200 text-xs mt-1">posts + comments</p>
+                                <p className="text-brand-200 text-xs mt-1">posts + comments</p>
                             </div>
-                            <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-6 rounded-xl text-white">
-                                <p className="text-purple-100 text-sm font-medium">Posts</p>
+                            <div className="bg-gradient-to-br from-accent-teal to-accent-teal-dark p-6 rounded-xl text-white">
+                                <p className="text-white/80 text-sm font-medium">Posts</p>
                                 <p className="text-4xl font-bold">{sentimentData.totals.posts}</p>
-                                <p className="text-purple-200 text-xs mt-1">Reddit submissions</p>
+                                <p className="text-white/70 text-xs mt-1">Reddit submissions</p>
                             </div>
-                            <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 p-6 rounded-xl text-white">
-                                <p className="text-indigo-100 text-sm font-medium">Comments</p>
+                            <div className="bg-gradient-to-br from-accent-blue to-accent-blue-dark p-6 rounded-xl text-white">
+                                <p className="text-white/80 text-sm font-medium">Comments</p>
                                 <p className="text-4xl font-bold">{sentimentData.totals.comments}</p>
-                                <p className="text-indigo-200 text-xs mt-1">user responses</p>
+                                <p className="text-white/70 text-xs mt-1">user responses</p>
                             </div>
                         </div>
 
 
                         {/* Tab Navigation */}
-                        <div className="flex border-b border-gray-200">
+                        <div className="flex border-b border-light-200 overflow-x-auto">
                             <button
                                 onClick={() => setActiveTab('charts')}
-                                className={`px-6 py-3 font-medium text-sm transition-colors ${activeTab === 'charts'
-                                    ? 'text-blue-600 border-b-2 border-blue-600'
-                                    : 'text-gray-500 hover:text-gray-700'
+                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'charts'
+                                    ? 'text-brand-600 border-b-2 border-brand-600'
+                                    : 'text-light-500 hover:text-light-700'
                                     }`}
                             >
                                 📊 Charts
                             </button>
                             <button
                                 onClick={() => setActiveTab('posts')}
-                                className={`px-6 py-3 font-medium text-sm transition-colors ${activeTab === 'posts'
-                                    ? 'text-blue-600 border-b-2 border-blue-600'
-                                    : 'text-gray-500 hover:text-gray-700'
+                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'posts'
+                                    ? 'text-brand-600 border-b-2 border-brand-600'
+                                    : 'text-light-500 hover:text-light-700'
                                     }`}
                             >
                                 📝 Posts ({currentDetailsData?.posts.length || 0})
                             </button>
                             <button
                                 onClick={() => setActiveTab('comments')}
-                                className={`px-6 py-3 font-medium text-sm transition-colors ${activeTab === 'comments'
-                                    ? 'text-blue-600 border-b-2 border-blue-600'
-                                    : 'text-gray-500 hover:text-gray-700'
+                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'comments'
+                                    ? 'text-brand-600 border-b-2 border-brand-600'
+                                    : 'text-light-500 hover:text-light-700'
                                     }`}
                             >
                                 💬 Comments ({currentDetailsData?.comments.length || 0})
@@ -399,12 +410,12 @@ const SentimentAnalysis: React.FC = () => {
 
                         {activeTab === 'posts' && currentDetailsData && (
                             <div className="space-y-4">
-                                <p className="text-sm text-gray-500">
-                                    Showing {currentDetailsData.posts.length} posts analyzed by RoBERTa sentiment model
+                                <p className="text-sm text-light-500">
+                                    Showing {currentDetailsData.posts.length} posts analyzed during Sentiment Analysis
                                     {isFiltered && ' (filtered by date range)'}
                                 </p>
                                 {currentDetailsData.posts.length === 0 ? (
-                                    <div className="p-6 bg-gray-50 text-gray-600 rounded-lg border text-center">
+                                    <div className="p-6 bg-light-50 text-light-600 rounded-lg border text-center">
                                         No posts found in the selected date range. Try adjusting your filter.
                                     </div>
                                 ) : (
@@ -413,21 +424,21 @@ const SentimentAnalysis: React.FC = () => {
                                             <div className="flex items-start justify-between gap-4">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-2">
-                                                        <span className="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded">
+                                                        <span className="text-xs text-light-400 bg-light-100 px-2 py-0.5 rounded">
                                                             r/{post.subreddit}
                                                         </span>
-                                                        <span className="text-xs text-gray-400">
+                                                        <span className="text-xs text-light-400">
                                                             {formatDate(post.created_at)}
                                                         </span>
-                                                        <span className="text-xs text-gray-400">
+                                                        <span className="text-xs text-light-400">
                                                             ⬆️ {post.score}
                                                         </span>
                                                     </div>
-                                                    <h4 className="font-semibold text-gray-800 mb-2 line-clamp-2">
+                                                    <h4 className="font-semibold text-light-800 mb-2 line-clamp-2">
                                                         {post.title}
                                                     </h4>
                                                     {post.body && (
-                                                        <p className="text-sm text-gray-600 line-clamp-3">
+                                                        <p className="text-sm text-light-600 line-clamp-3">
                                                             {post.body}
                                                         </p>
                                                     )}
@@ -436,7 +447,7 @@ const SentimentAnalysis: React.FC = () => {
                                                             href={post.url}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            className="text-xs text-blue-500 hover:underline mt-2 inline-block"
+                                                            className="text-xs text-brand-500 hover:underline mt-2 inline-block"
                                                         >
                                                             View on Reddit →
                                                         </a>
@@ -457,12 +468,12 @@ const SentimentAnalysis: React.FC = () => {
 
                         {activeTab === 'comments' && currentDetailsData && (
                             <div className="space-y-4">
-                                <p className="text-sm text-gray-500">
+                                <p className="text-sm text-light-500">
                                     Showing {currentDetailsData.comments.length} comments analyzed by RoBERTa sentiment model
                                     {isFiltered && ' (filtered by date range)'}
                                 </p>
                                 {currentDetailsData.comments.length === 0 ? (
-                                    <div className="p-6 bg-gray-50 text-gray-600 rounded-lg border text-center">
+                                    <div className="p-6 bg-light-50 text-light-600 rounded-lg border text-center">
                                         No comments found in the selected date range. Try adjusting your filter.
                                     </div>
                                 ) : (
@@ -471,17 +482,17 @@ const SentimentAnalysis: React.FC = () => {
                                             <div className="flex items-start justify-between gap-4">
                                                 <div className="flex-1 min-w-0">
                                                     <div className="flex items-center gap-2 mb-2">
-                                                        <span className="text-xs text-gray-400">
+                                                        <span className="text-xs text-light-400">
                                                             On: "{comment.post_title?.slice(0, 50)}..."
                                                         </span>
-                                                        <span className="text-xs text-gray-400">
+                                                        <span className="text-xs text-light-400">
                                                             ⬆️ {comment.score}
                                                         </span>
                                                     </div>
-                                                    <p className="text-sm text-gray-700 leading-relaxed">
+                                                    <p className="text-sm text-light-700 leading-relaxed">
                                                         "{comment.body}"
                                                     </p>
-                                                    <p className="text-xs text-gray-400 mt-2">
+                                                    <p className="text-xs text-light-400 mt-2">
                                                         {formatDate(comment.created_at)}
                                                     </p>
                                                 </div>
@@ -497,6 +508,12 @@ const SentimentAnalysis: React.FC = () => {
                                 )}
                             </div>
                         )}
+                    </div>
+                ) : loadingResults ? (
+                    <div className="text-center py-16 bg-gradient-to-br from-accent-green-light/10 to-accent-teal-light/10 rounded-xl border-2 border-accent-green-light/30">
+                        <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-accent-green border-t-transparent mb-6"></div>
+                        <p className="text-xl font-semibold text-light-800 mb-2">{loadingMessage}</p>
+                        <p className="text-sm text-light-500">Almost there...</p>
                     </div>
                 ) : status === 'COMPLETED' && !hasData ? (
                     <div className="text-center py-12 bg-amber-50 rounded-xl border-2 border-amber-300">
@@ -520,17 +537,17 @@ const SentimentAnalysis: React.FC = () => {
                         </div>
                     </div>
                 ) : status === 'FAILED' ? (
-                    <div className="p-6 bg-red-50 text-red-700 rounded-lg border border-red-200">
+                    <div className="p-6 bg-accent-red-light/10 text-accent-red-dark rounded-lg border border-accent-red-light/30">
                         <p className="font-bold">Pipeline Error</p>
                         <p className="text-sm">Check server logs for Request #{activeRequestId}.</p>
                     </div>
                 ) : (
-                    <div className="text-center py-20 text-gray-400 border border-dashed rounded-xl bg-gray-50">
-                        <svg className="mx-auto h-16 w-16 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="text-center py-20 text-light-400 border border-dashed rounded-xl bg-light-50">
+                        <svg className="mx-auto h-16 w-16 text-light-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                         </svg>
-                        <p className="text-lg font-medium text-gray-500">Enter a keyword to analyze brand sentiment</p>
-                        <p className="text-sm text-gray-400 mt-2">Powered by AI sentiment analysis</p>
+                        <p className="text-lg font-medium text-light-500">Enter a keyword to analyze brand sentiment</p>
+                        <p className="text-sm text-light-400 mt-2">Powered by AI sentiment analysis</p>
                     </div>
                 )}
             </div>

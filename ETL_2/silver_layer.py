@@ -31,14 +31,14 @@ pg_conn.autocommit = False
 # =====================================================
 # MODEL SETUP
 # =====================================================
-MODEL_NAME = "cardiffnlp/twitter-roberta-base-sentiment"
+MODEL_NAME = "ibrahimtime/bertweet-sentiment-finetuned"
 
 sentiment_pipeline = pipeline(
     "sentiment-analysis",
     model=MODEL_NAME,
     tokenizer=MODEL_NAME,
     truncation=True,
-    max_length=512,
+    max_length=128,
     device=0 if torch.cuda.is_available() else -1
 )
 

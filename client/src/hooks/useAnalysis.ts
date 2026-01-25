@@ -38,6 +38,13 @@ export const useAnalysis = () => {
                 setActiveRequestId(data.requestId);
             }
 
+            // Handle cached results (≥75% coverage threshold)
+            if (data.cached) {
+                console.log(`📦 Using cached results (${data.cacheInfo?.coverage?.toFixed(1)}% coverage)`);
+                setStatus('COMPLETED'); // Immediately mark as complete
+                return data; // Return the data so caller can fetch results
+            }
+
             return data;
         } catch (err) {
             console.error("Analysis failed to start:", err);

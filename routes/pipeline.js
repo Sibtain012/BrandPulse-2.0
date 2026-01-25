@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { Router } from 'express';
 import pool from '../db.js'; // Ensure you import your DB pool
+import { calculateCacheCoverage } from './cacheHelper.js';
 
 const router = Router();
 
@@ -44,48 +45,61 @@ async function saveAnalysisToHistory(requestId, keyword, userId, startDate, endD
         const posts = postsQuery.rows[0];
         const comments = commentsQuery.rows[0];
 
-        // Extract totals
+        // Check if we have any data to save
         const totalPosts = parseInt(posts.post_count) || 0;
         const totalComments = parseInt(comments.comment_count) || 0;
 
-        // Check if we have any sentiment data
         if (totalPosts === 0 && totalComments === 0) {
             console.log(`[History] No sentiment data found for Request ID: ${requestId}, skipping history save`);
-            return; // Don't save if no data exists yet
+            return;
         }
 
-        // Calculate dominant sentiment across all content
-        const totalPositive = (parseInt(posts.positive_posts) || 0) + (parseInt(comments.positive_comments) || 0);
-        const totalNeutral = (parseInt(posts.neutral_posts) || 0) + (parseInt(comments.neutral_comments) || 0);
-        const totalNegative = (parseInt(posts.negative_posts) || 0) + (parseInt(comments.negative_comments) || 0);
+        // Calculate dominant sentiment
+        const sentimentCounts = {
+            Positive: (parseInt(posts.positive_posts) || 0) + (parseInt(comments.positive_comments) || 0),
+            Neutral: (parseInt(posts.neutral_posts) || 0) + (parseInt(comments.neutral_comments) || 0),
+            Negative: (parseInt(posts.negative_posts) || 0) + (parseInt(comments.negative_comments) || 0)
+        };
 
-        let dominantSentiment = 'neutral';
-        if (totalPositive >= totalNeutral && totalPositive >= totalNegative) {
-            dominantSentiment = 'positive';
-        } else if (totalNegative >= totalNeutral && totalNegative >= totalPositive) {
-            dominantSentiment = 'negative';
-        }
+        const dominantSentiment = Object.keys(sentimentCounts).reduce((a, b) =>
+            sentimentCounts[a] > sentimentCounts[b] ? a : b
+        );
+
+        // Calculate average sentiment score (weighted by volume)
+        const totalItems = totalPosts + totalComments;
+        const avgPostScore = parseFloat(posts.avg_post_score) || 0;
+        const avgCommentScore = parseFloat(comments.avg_comment_score) || 0;
+        const weightedAvg = totalItems > 0
+            ? ((avgPostScore * totalPosts) + (avgCommentScore * totalComments)) / totalItems
+            : 0;
 
         // Insert into analysis_history
         await pool.query(`
             INSERT INTO analysis_history (
-                user_id, keyword, start_date, end_date,
-                total_posts, total_comments,
-                dominant_sentiment, avg_post_sentiment_score, avg_comment_sentiment_score,
+                keyword, user_id, start_date, end_date, 
+                total_posts, total_comments, 
+                dominant_sentiment, avg_sentiment_score,
+                avg_post_sentiment_score, avg_comment_sentiment_score,
                 request_id, platform_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             ON CONFLICT (user_id, keyword, start_date, end_date, platform_id) 
             DO UPDATE SET
                 total_posts = EXCLUDED.total_posts,
                 total_comments = EXCLUDED.total_comments,
                 dominant_sentiment = EXCLUDED.dominant_sentiment,
+                avg_sentiment_score = EXCLUDED.avg_sentiment_score,
                 avg_post_sentiment_score = EXCLUDED.avg_post_sentiment_score,
                 avg_comment_sentiment_score = EXCLUDED.avg_comment_sentiment_score,
                 analysis_timestamp = CURRENT_TIMESTAMP
         `, [
-            userId, keyword, startDate, endDate,
-            totalPosts, totalComments,
+            keyword,
+            userId,
+            startDate,
+            endDate,
+            totalPosts,
+            totalComments,
             dominantSentiment,
+            weightedAvg,
             parseFloat(posts.avg_post_score) || null,
             parseFloat(comments.avg_comment_score) || null,
             requestId,
@@ -135,10 +149,43 @@ router.post('/analyze', async (req, res) => {
     const platformId = 1;
 
     try {
-        // CREATE NEW RECORD (allow multiple analyses of same keyword)
+        // 2. SMART CACHE: Check for existing data with coverage calculation
+        console.log('[Cache] Checking cache coverage...');
+        const cacheResult = await calculateCacheCoverage(pool, keyword, user_id, finalStartDate, finalEndDate, platformId);
+
+        console.log(`[Cache] ${cacheResult.reason}`);
+
+        if (cacheResult.coverage >= 75) {
+            // CACHE HIT: Return existing analysis
+            return res.status(200).json({
+                message: `Using cached analysis (${cacheResult.coverage.toFixed(1)}% date range coverage)`,
+                status: 'COMPLETED',
+                requestId: cacheResult.bestMatch.requestId,
+                trigger: false,
+                cached: true,
+                cacheInfo: {
+                    coverage: cacheResult.coverage,
+                    cachedDateRange: {
+                        start: cacheResult.bestMatch.startDate,
+                        end: cacheResult.bestMatch.endDate
+                    },
+                    lastAnalyzed: cacheResult.bestMatch.lastRunAt
+                }
+            });
+        }
+
+        // CACHE MISS: Create new analysis
+        console.log('[Cache] Cache miss or insufficient coverage, running fresh pipeline');
+
+        // 3. CREATE NEW RECORD (allow multiple analyses of same keyword)
         const result = await pool.query(`
             INSERT INTO global_keywords (keyword, user_id, platform_id, status, bronze_processed, last_run_at, start_date, end_date)
             VALUES ($1, $2, $3, 'PROCESSING', FALSE, NOW(), $4, $5)
+            ON CONFLICT ON CONSTRAINT unique_user_keyword_request
+            DO UPDATE SET
+                status = 'PROCESSING',
+                bronze_processed = FALSE,
+                last_run_at = NOW()
             RETURNING global_keyword_id
         `, [keyword, user_id, platformId, finalStartDate, finalEndDate]);
 

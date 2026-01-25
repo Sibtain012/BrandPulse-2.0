@@ -198,12 +198,12 @@ const Login = () => {
                     {step === '2fa' && (
                         <div className="space-y-4 animate-fade-in">
                             {/* Email Notification */}
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div className="bg-brand-50 border border-brand-200 rounded-lg p-4">
                                 <div className="flex items-start gap-3">
-                                    <Mail className="w-5 h-5 text-blue-600 mt-0.5" />
+                                    <Mail className="w-5 h-5 text-brand-600 mt-0.5" />
                                     <div>
-                                        <p className="text-blue-800 font-medium">📧 Check Your Email</p>
-                                        <p className="text-sm text-blue-600 mt-1">
+                                        <p className="text-brand-800 font-medium">📧 Check Your Email</p>
+                                        <p className="text-sm text-brand-600 mt-1">
                                             We sent a 6-digit verification code to <strong>{formData.email}</strong>
                                         </p>
                                         <p className="text-xs text-blue-500 mt-2">
