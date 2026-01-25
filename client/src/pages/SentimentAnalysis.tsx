@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAnalysis } from '../hooks/useAnalysis';
 import SentimentChart from '../components/SentimentChart';
 import axios from 'axios';
@@ -65,7 +66,9 @@ const SentimentAnalysis: React.FC = () => {
     const [detailsData, setDetailsData] = useState<DetailsResponse | null>(null);
     const [ingestionStats, setIngestionStats] = useState<IngestionStats | null>(null);
     const [activeTab, setActiveTab] = useState<'charts' | 'posts' | 'comments'>('charts');
+    const [historicalRequestId, setHistoricalRequestId] = useState<number | null>(null);
     const { status, startAnalysis, activeRequestId } = useAnalysis();
+    const [searchParams] = useSearchParams();
 
     // Fetch sentiment summary data with longer retry logic
     const fetchWithRetry = useCallback(async (rid: number, attempt = 1) => {
@@ -144,6 +147,35 @@ const SentimentAnalysis: React.FC = () => {
         }
     }, [status, activeRequestId, fetchWithRetry]);
 
+    // Load historical data from URL query param (when coming from History page)
+    useEffect(() => {
+        const requestIdParam = searchParams.get('requestId');
+        if (requestIdParam) {
+            const rid = parseInt(requestIdParam, 10);
+            if (!isNaN(rid)) {
+                console.log(`📂 Loading historical analysis for Request ID: ${rid}`);
+                setHistoricalRequestId(rid);
+
+                // Fetch the historical data
+                const loadHistoricalData = async () => {
+                    try {
+                        const res = await axios.get<SentimentResponse>(`/api/data/results/${rid}`);
+                        if (res.data && res.data.totals && res.data.totals.total > 0) {
+                            setSentimentData(res.data);
+
+                            // Also fetch details
+                            const detailsRes = await axios.get<DetailsResponse>(`/api/data/details/${rid}`);
+                            setDetailsData(detailsRes.data);
+                        }
+                    } catch (err) {
+                        console.error('Failed to load historical data:', err);
+                    }
+                };
+                loadHistoricalData();
+            }
+        }
+    }, [searchParams]);
+
     const hasData = sentimentData && sentimentData.totals && sentimentData.totals.total > 0;
     const currentDetailsData = detailsData;
     const isFiltered = Boolean(startDate || endDate);
@@ -184,130 +216,149 @@ const SentimentAnalysis: React.FC = () => {
                     <p className="text-gray-500">Real-time Reddit sentiment analysis powered by RoBERTa AI (ID: {activeRequestId || 'None'})</p>
                 </header>
 
-                <section className="bg-white p-6 rounded-xl shadow-sm border mb-8">
-                    <form onSubmit={handleRunPipeline} className="space-y-4">
-                        {/* Keyword Input */}
-                        <div className="flex gap-4">
-                            <input
-                                type="text"
-                                className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-                                placeholder="Enter brand or keyword (e.g., iPhone 15, Tesla, Nike)"
-                                value={keyword}
-                                onChange={(e) => setKeyword(e.target.value)}
-                                disabled={status === 'PROCESSING'}
-                            />
-                            <button
-                                type="submit"
-                                disabled={status === 'PROCESSING'}
-                                className="px-8 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:bg-gray-400 transition-all"
-                            >
-                                {status === 'PROCESSING' ? 'Analyzing...' : 'Analyze Sentiment'}
-                            </button>
-                        </div>
-
-                        {/* Platform Selector */}
-                        <div className="border-t pt-4">
-                            <label className="text-sm font-semibold text-gray-700 mb-2 block">
-                                🌐 Select Platform:
-                            </label>
-                            <div className="flex gap-3">
-                                <button
-                                    type="button"
-                                    onClick={() => setPlatform('reddit')}
+                {/* Analysis Form - Hidden when viewing historical data */}
+                {!historicalRequestId && (
+                    <section className="bg-white p-6 rounded-xl shadow-sm border mb-8">
+                        <form onSubmit={handleRunPipeline} className="space-y-4">
+                            {/* Keyword Input */}
+                            <div className="flex gap-4">
+                                <input
+                                    type="text"
+                                    className="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                                    placeholder="Enter brand or keyword (e.g., iPhone 15, Tesla, Nike)"
+                                    value={keyword}
+                                    onChange={(e) => setKeyword(e.target.value)}
                                     disabled={status === 'PROCESSING'}
-                                    className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${platform === 'reddit'
-                                            ? 'bg-orange-500 text-white shadow-md'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        } disabled:opacity-50`}
-                                >
-                                    <div className="flex items-center justify-center gap-2">
-                                        <span className="text-xl">🔴</span>
-                                        <span>Reddit</span>
-                                    </div>
-                                </button>
+                                />
                                 <button
-                                    type="button"
-                                    onClick={() => setPlatform('twitter')}
+                                    type="submit"
                                     disabled={status === 'PROCESSING'}
-                                    className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${platform === 'twitter'
-                                            ? 'bg-blue-500 text-white shadow-md'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                        } disabled:opacity-50`}
+                                    className="px-8 py-3 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 disabled:bg-gray-400 transition-all"
                                 >
-                                    <div className="flex items-center justify-center gap-2">
-                                        <span className="text-xl">🐦</span>
-                                        <span>Twitter</span>
-                                    </div>
+                                    {status === 'PROCESSING' ? 'Analyzing...' : 'Analyze Sentiment'}
                                 </button>
                             </div>
-                        </div>
 
-                        {/* Date Range Filter - Always visible */}
-                        <div className="border-t pt-4">
-                            <div className="flex items-center gap-4 flex-wrap">
-                                <label className="text-sm font-semibold text-gray-700">
-                                    📅 Filter by Date Range (Optional):
+                            {/* Platform Selector */}
+                            <div className="border-t pt-4">
+                                <label className="text-sm font-semibold text-gray-700 mb-2 block">
+                                    🌐 Select Platform:
                                 </label>
-                                <div className="flex items-center gap-2">
-                                    <label className="text-sm text-gray-600">From:</label>
-                                    <input
-                                        type="date"
-                                        className="p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                        value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
-                                        disabled={status === 'PROCESSING'}
-                                    />
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <label className="text-sm text-gray-600">To:</label>
-                                    <input
-                                        type="date"
-                                        className="p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
-                                        value={endDate}
-                                        onChange={(e) => setEndDate(e.target.value)}
-                                        disabled={status === 'PROCESSING'}
-                                    />
-                                </div>
-                                {(startDate || endDate) && (
+                                <div className="flex gap-3">
                                     <button
                                         type="button"
-                                        onClick={handleClearDateFilter}
-                                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                        onClick={() => setPlatform('reddit')}
                                         disabled={status === 'PROCESSING'}
+                                        className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${platform === 'reddit'
+                                            ? 'bg-orange-500 text-white shadow-md'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            } disabled:opacity-50`}
                                     >
-                                        Clear Dates
+                                        <div className="flex items-center justify-center gap-2">
+                                            <span className="text-xl">🔴</span>
+                                            <span>Reddit</span>
+                                        </div>
                                     </button>
-                                )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setPlatform('twitter')}
+                                        disabled={status === 'PROCESSING'}
+                                        className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${platform === 'twitter'
+                                            ? 'bg-blue-500 text-white shadow-md'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                            } disabled:opacity-50`}
+                                    >
+                                        <div className="flex items-center justify-center gap-2">
+                                            <span className="text-xl">🐦</span>
+                                            <span>Twitter</span>
+                                        </div>
+                                    </button>
+                                </div>
                             </div>
-                            <p className="text-xs text-gray-500 mt-2">
-                                {startDate || endDate
-                                    ? `Analysis will filter data from ${startDate || 'beginning'} to ${endDate || 'present'}`
-                                    : 'Leave empty to analyze all available data'
-                                }
-                            </p>
-                        </div>
-                    </form>
-                </section>
 
-                {/* Status Bar */}
-                <div className="flex items-center gap-4 mb-8 p-4 bg-gray-50 rounded-lg border">
-                    <span className="font-semibold text-gray-700">Pipeline Status:</span>
-                    <div className={`px-4 py-1 rounded-full text-sm font-bold uppercase tracking-wider ${status === 'PROCESSING' ? 'bg-yellow-100 text-yellow-700 animate-pulse' :
-                        status === 'COMPLETED' ? 'bg-green-100 text-green-700' :
-                            status === 'FAILED' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600'
-                        }`}>
-                        {status}
+                            {/* Date Range Filter - Always visible */}
+                            <div className="border-t pt-4">
+                                <div className="flex items-center gap-4 flex-wrap">
+                                    <label className="text-sm font-semibold text-gray-700">
+                                        📅 Filter by Date Range (Optional):
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-sm text-gray-600">From:</label>
+                                        <input
+                                            type="date"
+                                            className="p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                            value={startDate}
+                                            onChange={(e) => setStartDate(e.target.value)}
+                                            disabled={status === 'PROCESSING'}
+                                        />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <label className="text-sm text-gray-600">To:</label>
+                                        <input
+                                            type="date"
+                                            className="p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                                            value={endDate}
+                                            onChange={(e) => setEndDate(e.target.value)}
+                                            disabled={status === 'PROCESSING'}
+                                        />
+                                    </div>
+                                    {(startDate || endDate) && (
+                                        <button
+                                            type="button"
+                                            onClick={handleClearDateFilter}
+                                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-300 transition-colors"
+                                            disabled={status === 'PROCESSING'}
+                                        >
+                                            Clear Dates
+                                        </button>
+                                    )}
+                                </div>
+                                <p className="text-xs text-gray-500 mt-2">
+                                    {startDate || endDate
+                                        ? `Analysis will filter data from ${startDate || 'beginning'} to ${endDate || 'present'}`
+                                        : 'Leave empty to analyze all available data'
+                                    }
+                                </p>
+                            </div>
+                        </form>
+                    </section>
+                )}
+
+                {/* Historical Data Banner */}
+                {historicalRequestId && (
+                    <div className="mb-6 p-4 bg-amber-50 border-l-4 border-amber-500 rounded-lg">
+                        <div className="flex items-center gap-2">
+                            <span className="text-2xl">📂</span>
+                            <div>
+                                <p className="font-semibold text-amber-800">Viewing Past Analysis</p>
+                                <p className="text-sm text-amber-700">
+                                    Showing previously analyzed data
+                                </p>
+                            </div>
+                        </div>
                     </div>
-                    {hasData && (
-                        <span className="ml-auto text-sm text-gray-500">
-                            {isFiltered ? 'Filtered: ' : 'Analyzed: '}
-                            {sentimentData.totals.posts} posts • {sentimentData.totals.comments} comments
+                )}
+
+                {/* Loading Indicator - Only show when processing */}
+                {status === 'PROCESSING' && (
+                    <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg mb-6">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                        <span className="text-blue-800 font-medium">Analyzing sentiment...</span>
+                    </div>
+                )}
+
+                {/* Results Summary - Only show when data exists */}
+                {hasData && (status === 'COMPLETED' || historicalRequestId) && !historicalRequestId && (
+                    <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg mb-6">
+                        <span className="text-green-700">✓</span>
+                        <span className="text-sm text-green-800 font-medium">
+                            Analysis complete: {sentimentData.totals.posts} posts • {sentimentData.totals.comments} comments
                         </span>
-                    )}
-                </div>
+                    </div>
+                )}
 
                 {/* Results Section */}
-                {status === 'COMPLETED' && hasData ? (
+                {(status === 'COMPLETED' || historicalRequestId) && hasData ? (
                     <div className="space-y-8">
                         {/* Summary Stats */}
                         <div className="grid grid-cols-3 gap-4">
@@ -328,31 +379,6 @@ const SentimentAnalysis: React.FC = () => {
                             </div>
                         </div>
 
-                        {/* Ingestion Statistics */}
-                        {ingestionStats && !isFiltered && (
-                            <div className="bg-white p-5 rounded-xl border shadow-sm">
-                                <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                                    <span className="text-xl">📥</span> Ingestion Statistics
-                                </h3>
-                                <div className="grid grid-cols-3 gap-4">
-                                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                                        <p className="text-green-600 text-xs font-medium uppercase tracking-wide">Processed</p>
-                                        <p className="text-2xl font-bold text-green-700">{ingestionStats.processed}</p>
-                                        <p className="text-green-500 text-xs mt-1">Reddit posts fetched</p>
-                                    </div>
-                                    <div className="bg-orange-50 p-4 rounded-lg border border-orange-200">
-                                        <p className="text-orange-600 text-xs font-medium uppercase tracking-wide">Skipped (NSFW)</p>
-                                        <p className="text-2xl font-bold text-orange-700">{ingestionStats.skipped_nsfw}</p>
-                                        <p className="text-orange-500 text-xs mt-1">Adult content filtered</p>
-                                    </div>
-                                    <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                                        <p className="text-yellow-600 text-xs font-medium uppercase tracking-wide">Skipped (Non-English)</p>
-                                        <p className="text-2xl font-bold text-yellow-700">{ingestionStats.skipped_non_english}</p>
-                                        <p className="text-yellow-500 text-xs mt-1">Language filtered</p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
 
                         {/* Tab Navigation */}
                         <div className="flex border-b border-gray-200">
@@ -528,7 +554,7 @@ const SentimentAnalysis: React.FC = () => {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                         </svg>
                         <p className="text-lg font-medium text-gray-500">Enter a keyword to analyze brand sentiment</p>
-                        <p className="text-sm text-gray-400 mt-2">Powered by the Medallion Architecture Pipeline</p>
+                        <p className="text-sm text-gray-400 mt-2">Powered by AI sentiment analysis</p>
                     </div>
                 )}
             </div>
