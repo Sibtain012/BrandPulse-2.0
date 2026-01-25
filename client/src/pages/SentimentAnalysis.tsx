@@ -61,25 +61,33 @@ const SentimentAnalysis: React.FC = () => {
     const [keyword, setKeyword] = useState<string>('');
     const [startDate, setStartDate] = useState<string>('');
     const [endDate, setEndDate] = useState<string>('');
-    const [platform, setPlatform] = useState<'reddit' | 'twitter'>('reddit');
     const [sentimentData, setSentimentData] = useState<SentimentResponse | null>(null);
     const [detailsData, setDetailsData] = useState<DetailsResponse | null>(null);
     const [ingestionStats, setIngestionStats] = useState<IngestionStats | null>(null);
     const [activeTab, setActiveTab] = useState<'charts' | 'posts' | 'comments'>('charts');
     const [historicalRequestId, setHistoricalRequestId] = useState<number | null>(null);
+    const [loadingMessage, setLoadingMessage] = useState<string>('Starting analysis...');
     const { status, startAnalysis, activeRequestId } = useAnalysis();
     const [searchParams] = useSearchParams();
 
     // Fetch sentiment summary data with longer retry logic
     const fetchWithRetry = useCallback(async (rid: number, attempt = 1) => {
         try {
-            // Wait longer on first attempt (5 seconds) to give pipeline time to start
-            if (attempt === 1) await new Promise(r => setTimeout(r, 5000));
+            // Update loading message based on attempt
+            if (attempt === 1) {
+                setLoadingMessage('Collecting data from social media...');
+                await new Promise(r => setTimeout(r, 5000));
+            } else if (attempt <= 4) {
+                setLoadingMessage('Analyzing sentiment with AI...');
+            } else {
+                setLoadingMessage('Finalizing results...');
+            }
 
             const res = await axios.get<SentimentResponse>(`/api/data/results/${rid}`);
 
             if (res.data && res.data.totals && res.data.totals.total > 0) {
                 console.log(`✅ Data ready! Posts: ${res.data.totals.posts}, Comments: ${res.data.totals.comments}`);
+                setLoadingMessage('Analysis complete!');
                 setSentimentData(res.data);
                 // Also fetch detailed data for proof
                 const detailsRes = await axios.get<DetailsResponse>(`/api/data/details/${rid}`);
@@ -126,14 +134,8 @@ const SentimentAnalysis: React.FC = () => {
         setIngestionStats(null);
         setActiveTab('charts');
 
-        // Send dates and platform to backend along with keyword and actual user ID
-        const result = await startAnalysis(keyword, userId, startDate || null, endDate || null, platform);
-
-        // If cached results, immediately fetch the data
-        if (result?.cached && result?.requestId) {
-            console.log('📦 Loading cached results...');
-            await fetchWithRetry(result.requestId, 1);
-        }
+        // Send dates to backend along with keyword and actual user ID (Reddit only)
+        await startAnalysis(keyword, userId, startDate || null, endDate || null, 'reddit');
     };
 
     const handleClearDateFilter = () => {
@@ -239,43 +241,6 @@ const SentimentAnalysis: React.FC = () => {
                                 </button>
                             </div>
 
-                            {/* Platform Selector */}
-                            <div className="border-t pt-4">
-                                <label className="text-sm font-semibold text-gray-700 mb-2 block">
-                                    🌐 Select Platform:
-                                </label>
-                                <div className="flex gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setPlatform('reddit')}
-                                        disabled={status === 'PROCESSING'}
-                                        className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${platform === 'reddit'
-                                            ? 'bg-orange-500 text-white shadow-md'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                            } disabled:opacity-50`}
-                                    >
-                                        <div className="flex items-center justify-center gap-2">
-                                            <span className="text-xl">🔴</span>
-                                            <span>Reddit</span>
-                                        </div>
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setPlatform('twitter')}
-                                        disabled={status === 'PROCESSING'}
-                                        className={`flex-1 px-4 py-3 rounded-lg font-medium transition-all ${platform === 'twitter'
-                                            ? 'bg-blue-500 text-white shadow-md'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                            } disabled:opacity-50`}
-                                    >
-                                        <div className="flex items-center justify-center gap-2">
-                                            <span className="text-xl">🐦</span>
-                                            <span>Twitter</span>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-
                             {/* Date Range Filter - Always visible */}
                             <div className="border-t pt-4">
                                 <div className="flex items-center gap-4 flex-wrap">
@@ -341,9 +306,10 @@ const SentimentAnalysis: React.FC = () => {
 
                 {/* Loading Indicator - Only show when processing */}
                 {status === 'PROCESSING' && (
-                    <div className="flex items-center gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg mb-6">
-                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-                        <span className="text-blue-800 font-medium">Analyzing sentiment...</span>
+                    <div className="text-center py-16 bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl border-2 border-blue-200">
+                        <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mb-6"></div>
+                        <p className="text-xl font-semibold text-gray-800 mb-2">{loadingMessage}</p>
+                        <p className="text-sm text-gray-500">This usually takes 30-60 seconds</p>
                     </div>
                 )}
 
@@ -533,15 +499,25 @@ const SentimentAnalysis: React.FC = () => {
                         )}
                     </div>
                 ) : status === 'COMPLETED' && !hasData ? (
-                    <div className="p-6 bg-blue-50 text-blue-700 rounded-lg border border-blue-200">
-                        <p className="font-bold">No Results Found</p>
-                        <p className="text-sm">No relevant Reddit data was found for this keyword. Try a different search term.</p>
-                    </div>
-                ) : status === 'PROCESSING' ? (
-                    <div className="text-center py-20 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-                        <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-                        <p className="text-gray-600 font-medium">Analyzing Reddit data...</p>
-                        <p className="text-gray-400 text-sm mt-2">Request #{activeRequestId} • This may take 30-60 seconds</p>
+                    <div className="text-center py-12 bg-amber-50 rounded-xl border-2 border-amber-300">
+                        <div className="mb-4">
+                            <svg className="mx-auto h-16 w-16 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M12 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <h3 className="text-xl font-bold text-amber-900 mb-2">No Results Found</h3>
+                        <p className="text-amber-800 mb-4 max-w-md mx-auto">
+                            The analysis completed successfully, but no Reddit posts were found for this keyword.
+                        </p>
+                        <div className="bg-white border border-amber-200 rounded-lg p-4 max-w-lg mx-auto text-left">
+                            <p className="font-semibold text-amber-900 mb-2 text-sm">💡 Try these suggestions:</p>
+                            <ul className="text-sm text-amber-800 space-y-1 list-disc list-inside">
+                                <li>Use a more popular or general search term</li>
+                                <li>Check spelling and try different variations</li>
+                                <li>Search for well-known brands with active discussions</li>
+                                <li>Try removing date filters if you're using them</li>
+                            </ul>
+                        </div>
                     </div>
                 ) : status === 'FAILED' ? (
                     <div className="p-6 bg-red-50 text-red-700 rounded-lg border border-red-200">

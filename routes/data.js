@@ -18,83 +18,46 @@ async function getMongoDb() {
     return mongoDb;
 }
 
-// GET /api/data/results/:requestId
-// Returns sentiment distribution for BOTH posts and comments separately
-// Filters by date range from global_keywords table
 router.get("/results/:requestId", async (req, res) => {
     try {
         const rid = parseInt(req.params.requestId);
         console.log(`[API] Fetching results for Request ID: ${rid}`);
 
-        // Get platform from global_keywords
-        const platformQuery = await pool.query(
-            `SELECT platform_id FROM global_keywords WHERE global_keyword_id = $1`,
-            [rid]
-        );
+        // Reddit: Query silver tables
+        const postsResult = await pool.query(`
+            SELECT 
+                sp.post_sentiment_label as name, 
+                COUNT(*)::INT as value 
+            FROM silver_reddit_posts sp
+            JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+            JOIN dim_sentiment ds ON ds.sentiment_label = sp.post_sentiment_label
+            WHERE sp.global_keyword_id = $1
+            AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
+            AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
+            GROUP BY sp.post_sentiment_label, ds.sentiment_order
+            ORDER BY ds.sentiment_order ASC
+        `, [rid]);
 
-        if (platformQuery.rows.length === 0) {
-            return res.status(404).json({ error: "Request not found" });
-        }
-
-        const platformId = platformQuery.rows[0].platform_id;
-
-        let postsResult, commentsResult;
-
-        if (platformId === 2) {
-            // Twitter: Query fact_sentiment_events
-            postsResult = await pool.query(`
-                SELECT 
-                    ds.sentiment_label as name, 
-                    COUNT(*)::INT as value 
-                FROM fact_sentiment_events f
-                JOIN dim_sentiment ds ON f.sentiment_id = ds.sentiment_id
-                WHERE f.request_id = $1
-                AND f.platform_id = 2
-                AND f.content_type_id = 3
-                GROUP BY ds.sentiment_label, ds.sentiment_order
-                ORDER BY ds.sentiment_order ASC
-            `, [rid]);
-
-            // Twitter doesn't have comments
-            commentsResult = { rows: [] };
-
-        } else {
-            // Reddit: Query silver tables
-            postsResult = await pool.query(`
-                SELECT 
-                    sp.post_sentiment_label as name, 
-                    COUNT(*)::INT as value 
-                FROM silver_reddit_posts sp
-                JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
-                JOIN dim_sentiment ds ON ds.sentiment_label = sp.post_sentiment_label
-                WHERE sp.global_keyword_id = $1
-                AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
-                AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
-                GROUP BY sp.post_sentiment_label, ds.sentiment_order
-                ORDER BY ds.sentiment_order ASC
-            `, [rid]);
-
-            commentsResult = await pool.query(`
-                SELECT 
-                    sc.comment_sentiment_label as name, 
-                    COUNT(*)::INT as value 
-                FROM silver_reddit_comments sc
-                JOIN silver_reddit_posts sp ON sc.silver_post_id = sp.silver_post_id
-                JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
-                JOIN dim_sentiment ds ON ds.sentiment_label = sc.comment_sentiment_label
-                WHERE sp.global_keyword_id = $1
-                AND (gk.start_date IS NULL OR DATE(sc.comment_created_at_utc) >= gk.start_date)
-                AND (gk.end_date IS NULL OR DATE(sc.comment_created_at_utc) <= gk.end_date)
-                GROUP BY sc.comment_sentiment_label, ds.sentiment_order
-                ORDER BY ds.sentiment_order ASC
-            `, [rid]);
-        }
+        const commentsResult = await pool.query(`
+            SELECT 
+                sc.comment_sentiment_label as name, 
+                COUNT(*)::INT as value 
+            FROM silver_reddit_comments sc
+            JOIN silver_reddit_posts sp ON sc.silver_post_id = sp.silver_post_id
+            JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+            JOIN dim_sentiment ds ON ds.sentiment_label = sc.comment_sentiment_label
+            WHERE sp.global_keyword_id = $1
+            AND (gk.start_date IS NULL OR DATE(sc.comment_created_at_utc) >= gk.start_date)
+            AND (gk.end_date IS NULL OR DATE(sc.comment_created_at_utc) <= gk.end_date)
+            GROUP BY sc.comment_sentiment_label, ds.sentiment_order
+            ORDER BY ds.sentiment_order ASC
+        `, [rid]);
 
         // Calculate totals
         const postTotal = postsResult.rows.reduce((sum, r) => sum + r.value, 0);
         const commentTotal = commentsResult.rows.reduce((sum, r) => sum + r.value, 0);
 
-        console.log(`[API] Found ${postTotal} posts and ${commentTotal} comments for ID ${rid} (platform: ${platformId === 2 ? 'twitter' : 'reddit'})`);
+        console.log(`[API] Found ${postTotal} posts and ${commentTotal} comments for ID ${rid} (Reddit)`);
 
         res.json({
             posts: postsResult.rows,
@@ -111,103 +74,58 @@ router.get("/results/:requestId", async (req, res) => {
     }
 });
 
-// GET /api/data/details/:requestId
-// Returns actual posts and comments with their sentiment labels as proof
-// Filters by date range if user specified dates
 router.get("/details/:requestId", async (req, res) => {
     try {
         const rid = parseInt(req.params.requestId);
         console.log(`[API] Fetching detailed data for Request ID: ${rid}`);
 
-        // Get platform from global_keywords
-        const platformQuery = await pool.query(
-            `SELECT platform_id FROM global_keywords WHERE global_keyword_id = $1`,
-            [rid]
-        );
+        // Reddit: Fetch posts and comments
+        const postsResult = await pool.query(`
+            SELECT 
+                sp.silver_post_id as id,
+                sp.title_clean as title,
+                sp.body_clean as body,
+                sp.subreddit_name as subreddit,
+                sp.post_score as score,
+                sp.post_sentiment_label as sentiment,
+                sp.post_sentiment_score as confidence,
+                sp.post_url as url,
+                sp.created_at_utc as created_at
+            FROM silver_reddit_posts sp
+            JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+            WHERE sp.global_keyword_id = $1
+            AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
+            AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
+            ORDER BY sp.post_score DESC
+            LIMIT 50
+        `, [rid]);
 
-        if (platformQuery.rows.length === 0) {
-            return res.status(404).json({ error: "Request not found" });
-        }
+        const commentsResult = await pool.query(`
+            SELECT 
+                c.silver_comment_id as id,
+                c.comment_body_clean as body,
+                c.comment_score as score,
+                c.comment_sentiment_label as sentiment,
+                c.comment_sentiment_score as confidence,
+                c.comment_created_at_utc as created_at,
+                p.title_clean as post_title,
+                p.silver_post_id as post_id
+            FROM silver_reddit_comments c
+            JOIN silver_reddit_posts p ON c.silver_post_id = p.silver_post_id
+            JOIN global_keywords gk ON gk.global_keyword_id = p.global_keyword_id
+            WHERE p.global_keyword_id = $1
+            AND (gk.start_date IS NULL OR DATE(c.comment_created_at_utc) >= gk.start_date)
+            AND (gk.end_date IS NULL OR DATE(c.comment_created_at_utc) <= gk.end_date)
+            ORDER BY c.comment_score DESC
+            LIMIT 100
+        `, [rid]);
 
-        const platformId = platformQuery.rows[0].platform_id;
-
-        let postsResult, commentsResult;
-
-        if (platformId === 2) {
-            // Twitter: Fetch tweets with engagement metrics
-            postsResult = await pool.query(`
-                SELECT 
-                    st.silver_tweet_id as id,
-                    st.text_clean as title,
-                    st.text_clean as body,
-                    st.tweet_sentiment_label as sentiment,
-                    st.tweet_sentiment_score as confidence,
-                    st.tweet_url as url,
-                    st.tweet_created_at as created_at,
-                    st.retweet_count,
-                    st.favorite_count as likes,
-                    st.reply_count,
-                    st.quote_count,
-                    (COALESCE(st.retweet_count, 0) + COALESCE(st.favorite_count, 0) + 
-                     COALESCE(st.reply_count, 0) + COALESCE(st.quote_count, 0)) as engagement_score
-                FROM silver_twitter_tweets st
-                WHERE st.global_keyword_id = $1
-                ORDER BY (COALESCE(st.retweet_count, 0) + COALESCE(st.favorite_count, 0)) DESC
-                LIMIT 50
-            `, [rid]);
-
-            // Twitter doesn't have comments
-            commentsResult = { rows: [] };
-
-        } else {
-            // Reddit: Fetch posts and comments
-            postsResult = await pool.query(`
-                SELECT 
-                    sp.silver_post_id as id,
-                    sp.title_clean as title,
-                    sp.body_clean as body,
-                    sp.subreddit_name as subreddit,
-                    sp.post_score as score,
-                    sp.post_sentiment_label as sentiment,
-                    sp.post_sentiment_score as confidence,
-                    sp.post_url as url,
-                    sp.created_at_utc as created_at
-                FROM silver_reddit_posts sp
-                JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
-                WHERE sp.global_keyword_id = $1
-                AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
-                AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
-                ORDER BY sp.post_score DESC
-                LIMIT 50
-            `, [rid]);
-
-            commentsResult = await pool.query(`
-                SELECT 
-                    c.silver_comment_id as id,
-                    c.comment_body_clean as body,
-                    c.comment_score as score,
-                    c.comment_sentiment_label as sentiment,
-                    c.comment_sentiment_score as confidence,
-                    c.comment_created_at_utc as created_at,
-                    p.title_clean as post_title,
-                    p.silver_post_id as post_id
-                FROM silver_reddit_comments c
-                JOIN silver_reddit_posts p ON c.silver_post_id = p.silver_post_id
-                JOIN global_keywords gk ON gk.global_keyword_id = p.global_keyword_id
-                WHERE p.global_keyword_id = $1
-                AND (gk.start_date IS NULL OR DATE(c.comment_created_at_utc) >= gk.start_date)
-                AND (gk.end_date IS NULL OR DATE(c.comment_created_at_utc) <= gk.end_date)
-                ORDER BY c.comment_score DESC
-                LIMIT 100
-            `, [rid]);
-        }
-
-        console.log(`[API] Found ${postsResult.rows.length} posts and ${commentsResult.rows.length} comments details (platform: ${platformId === 2 ? 'twitter' : 'reddit'})`);
+        console.log(`[API] Found ${postsResult.rows.length} posts and ${commentsResult.rows.length} comments details (Reddit)`);
 
         res.json({
             posts: postsResult.rows,
             comments: commentsResult.rows,
-            platform: platformId === 2 ? 'twitter' : 'reddit'
+            platform: 'reddit'
         });
     } catch (err) {
         console.error("Details fetch failed:", err.message);

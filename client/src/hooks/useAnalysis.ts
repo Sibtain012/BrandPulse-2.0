@@ -33,19 +33,10 @@ export const useAnalysis = () => {
 
             const data = await response.json();
 
-            // CAPTURE: Store the requestId for polling
+            // Store the requestId for polling
             if (data.requestId) {
                 setActiveRequestId(data.requestId);
             }
-
-            // Handle cached results (duplicate keyword + dates)
-            if (data.cached) {
-                console.log('📦 Using cached results for this keyword and date range');
-                setStatus('COMPLETED'); // Immediately mark as complete
-                return data; // Return the data so caller can fetch results
-            }
-
-            if (data.trigger === false) setStatus('COMPLETED');
 
             return data;
         } catch (err) {
@@ -56,6 +47,9 @@ export const useAnalysis = () => {
 
     useEffect(() => {
         let interval: any;
+        let failCount = 0;
+        const MAX_FAILS = 5; // Allow up to 5 failed polls before giving up
+
         // Poll only if we have an active requestId
         if (status === 'PROCESSING' && activeRequestId) {
             interval = setInterval(async () => {
@@ -63,15 +57,30 @@ export const useAnalysis = () => {
                     // FIX: Use relative URL to leverage Vite proxy (avoids CORS & port issues)
                     // Route path matches backend: /api/pipeline/status/id/:requestId
                     const res = await fetch(`/api/pipeline/status/id/${activeRequestId}`);
+
+                    if (!res.ok) {
+                        throw new Error(`HTTP ${res.status}`);
+                    }
+
                     const data = await res.json();
+
+                    // Reset fail count on successful poll
+                    failCount = 0;
 
                     if (data.status === 'COMPLETED' || data.status === 'FAILED') {
                         setStatus(data.status);
                         clearInterval(interval);
                     }
                 } catch (e) {
-                    setStatus('FAILED');
-                    clearInterval(interval);
+                    failCount++;
+                    console.warn(`⚠️ Status poll failed (${failCount}/${MAX_FAILS}):`, e);
+
+                    // Only mark as failed after multiple consecutive failures
+                    if (failCount >= MAX_FAILS) {
+                        console.error('❌ Too many failed status polls, marking as FAILED');
+                        setStatus('FAILED');
+                        clearInterval(interval);
+                    }
                 }
             }, 3000);
         }
