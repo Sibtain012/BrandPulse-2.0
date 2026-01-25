@@ -2,9 +2,16 @@ import { useState, useEffect } from 'react';
 import type { AnalysisStatus } from '../utils/api';
 
 export const useAnalysis = () => {
-    const [status, setStatus] = useState<AnalysisStatus>('IDLE');
-    // Track the unique ID returned by the server instead of just the keyword string
-    const [activeRequestId, setActiveRequestId] = useState<number | null>(null);
+    // Initialize status based on whether we have a stored request ID
+    const [status, setStatus] = useState<AnalysisStatus>(() => {
+        return localStorage.getItem('activeRequestId') ? 'PROCESSING' : 'IDLE';
+    });
+
+    // Initialize activeRequestId from localStorage if available
+    const [activeRequestId, setActiveRequestId] = useState<number | null>(() => {
+        const stored = localStorage.getItem('activeRequestId');
+        return stored ? parseInt(stored) : null;
+    });
 
     // Updated to accept userId and optional date parameters
     const startAnalysis = async (
@@ -36,12 +43,16 @@ export const useAnalysis = () => {
             // Store the requestId for polling
             if (data.requestId) {
                 setActiveRequestId(data.requestId);
+                localStorage.setItem('activeRequestId', data.requestId.toString());
             }
 
             // Handle cached results (≥75% coverage threshold)
             if (data.cached) {
                 console.log(`📦 Using cached results (${data.cacheInfo?.coverage?.toFixed(1)}% coverage)`);
                 setStatus('COMPLETED'); // Immediately mark as complete
+                // If cached, we don't need to persist or poll
+                localStorage.removeItem('activeRequestId');
+                setActiveRequestId(null);
                 return data; // Return the data so caller can fetch results
             }
 
@@ -49,6 +60,7 @@ export const useAnalysis = () => {
         } catch (err) {
             console.error("Analysis failed to start:", err);
             setStatus('FAILED');
+            localStorage.removeItem('activeRequestId');
         }
     };
 
@@ -76,6 +88,8 @@ export const useAnalysis = () => {
 
                     if (data.status === 'COMPLETED' || data.status === 'FAILED') {
                         setStatus(data.status);
+                        // Clear persistence once terminal state is reached
+                        localStorage.removeItem('activeRequestId');
                         clearInterval(interval);
                     }
                 } catch (e) {
@@ -86,6 +100,7 @@ export const useAnalysis = () => {
                     if (failCount >= MAX_FAILS) {
                         console.error('❌ Too many failed status polls, marking as FAILED');
                         setStatus('FAILED');
+                        localStorage.removeItem('activeRequestId');
                         clearInterval(interval);
                     }
                 }
