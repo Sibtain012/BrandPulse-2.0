@@ -469,7 +469,7 @@ const SentimentAnalysis: React.FC = () => {
                         {activeTab === 'comments' && currentDetailsData && (
                             <div className="space-y-4">
                                 <p className="text-sm text-light-500">
-                                    Showing {currentDetailsData.comments.length} comments analyzed by RoBERTa sentiment model
+                                    Showing {currentDetailsData.comments.length} comments analyzed during Sentiment Analysis
                                     {isFiltered && ' (filtered by date range)'}
                                 </p>
                                 {currentDetailsData.comments.length === 0 ? (

@@ -42,6 +42,7 @@ reddit = praw.Reddit(
     user_agent=REDDIT_USER_AGENT
 )
 
+
 # ============================
 # UTILS
 # ============================
@@ -87,6 +88,7 @@ def mark_keyword_processed(keyword_id):
             WHERE global_keyword_id = %s
         """, (keyword_id,))
     pg.commit()
+
 
 def mark_keyword_status(keyword_id, status):
     with pg.cursor() as cur:
@@ -159,25 +161,48 @@ def ingest_keyword(row_or_keyword, request_id=None):
     skipped_non_english = 0
     skipped_nsfw = 0
     errors = 0
-    inserted = 0  # Initialize to avoid undefined variable error in exception handler
+    inserted = 0
 
     print(f"[BRONZE] Ingesting keyword: {keyword}")
 
     try:
-        # The main extraction loop - OPTIMIZED: Reduced limit from 50 to 15 for faster processing
+        #  Reduced limit from 50 to 15 for faster processing
         for submission in reddit.subreddit("all").search(
-            query=f'"{keyword}" nsfw:no',  # OPTIMIZED: Exact phrase match with quotes
-            sort="relevance",  # OPTIMIZED: Relevance instead of top for better matches
-            limit=15,  # OPTIMIZED: Reduced from 50 to 15 for faster processing
-            time_filter="month"  # OPTIMIZED: Month instead of day for more data availability
+                query=f'"{keyword}" nsfw:no',  # Exact phrase match with quotes
+                sort="relevance",  #  Relevance instead of top for better matches
+                limit=15,
+                time_filter="month"  #Month instead of day for more data availability
         ):
             try:
+                # FILTER: Skip NSFW (Already in query, but double check)
                 if submission.over_18:
                     skipped_nsfw += 1
                     continue
 
+                # FILTER: Skip Non-English
                 if not is_english(submission.title + " " + submission.selftext):
                     skipped_non_english += 1
+                    continue
+
+                # FILTER: Strict Media Check (No videos, images, or GIFs)
+                # Check 1: is_video flag
+                if getattr(submission, 'is_video', False):
+                    continue
+
+                # Check 2: URL file extensions
+                url_lower = submission.url.lower() if submission.url else ""
+                if url_lower.endswith(('.jpg', '.jpeg', '.png', '.gif', '.mp4', '.mov', '.webp')):
+                    continue
+
+                # Check 3: Post hint (often indicates embedded media)
+                post_hint = getattr(submission, 'post_hint', '')
+                if post_hint in ['image', 'hosted:video', 'rich:video']:
+                    continue
+
+                # FILTER: Strict Relevance Check
+                # Reddit's search is fuzzy. We ensure the keyword is actually in the title or body.
+                full_text = (submission.title + " " + submission.selftext).lower()
+                if keyword.lower() not in full_text:
                     continue
 
                 post_raw, comments_raw = extract_submission(submission)
@@ -268,6 +293,7 @@ def ingest_keyword(row_or_keyword, request_id=None):
         }}
     )
     print(f"[BRONZE] Completed {keyword} | Inserted: {inserted}")
+
 
 # ============================
 # ENTRYPOINT
