@@ -34,6 +34,7 @@ errors_col = mdb["bronze_errors"]
 pg = psycopg2.connect(POSTGRES_URI)
 pg.autocommit = False
 
+
 # ============================
 # POSTGRES HELPERS
 # ============================
@@ -79,19 +80,19 @@ def build_query_params(keyword: str, start_date: Optional[str], end_date: Option
     """Build query parameters for Twitter API including date filters."""
     # Build query string with language filter
     query_string = f"{keyword} lang:en"
-    
+
     # Add date filters to query string if provided
     if start_date:
         query_string += f" since:{start_date}"
-    
+
     if end_date:
         query_string += f" until:{end_date}"
-    
+
     params = {
         "query": query_string,
         "search_type": "Top"  # Alexander Vikhorev's API uses this parameter
     }
-    
+
     return params
 
 
@@ -102,41 +103,42 @@ def fetch_tweets(keyword: str, start_date: Optional[str], end_date: Optional[str
     """
     if not RAPIDAPI_KEY or not RAPIDAPI_HOST:
         return [], 0, "Missing RapidAPI credentials (RAPIDAPI_KEY or RAPIDAPI_HOST)"
-    
+
     url = f"https://{RAPIDAPI_HOST}/{TWITTER_ENDPOINT.lstrip('/')}"  # Ensure single slash
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
         "X-RapidAPI-Host": RAPIDAPI_HOST
     }
-    
+
     params = build_query_params(keyword, start_date, end_date)
-    
+
     try:
         response = requests.get(url, headers=headers, params=params, timeout=30)
-        
+
         # Extract rate limit info
         rate_limit_remaining = int(response.headers.get("X-RateLimit-Remaining", 0))
-        
+
         # Check for rate limit exhaustion
         if response.status_code == 429:
             return [], rate_limit_remaining, "Rate limit exceeded"
-        
+
         response.raise_for_status()
-        
+
         data = response.json()
-        
+
         # Extract tweets from response - Alexander Vikhorev's API structure
         # The response might be a list directly or nested in a key
         if isinstance(data, list):
             tweets = data
         elif isinstance(data, dict):
             # Try common keys
-            tweets = data.get("timeline", []) or data.get("results", []) or data.get("data", []) or data.get("tweets", [])
+            tweets = data.get("timeline", []) or data.get("results", []) or data.get("data", []) or data.get("tweets",
+                                                                                                             [])
         else:
             tweets = []
-        
+
         return tweets, rate_limit_remaining, None
-        
+
     except requests.exceptions.Timeout:
         return [], 0, "Request timeout"
     except requests.exceptions.RequestException as e:
@@ -168,7 +170,7 @@ def extract_tweet_data(tweet: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             "lang": tweet.get("lang", "en"),
             "source": tweet.get("source", "unknown")
         }
-        
+
         # Extract quotes if available (limited by API)
         quotes = []
         if "quoted_status" in tweet:
@@ -183,18 +185,18 @@ def extract_tweet_data(tweet: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     "replies": quoted.get("reply_count", 0)
                 }
             })
-        
+
         # Extract replies if available (usually limited)
         replies = []
         # Note: Most free APIs don't provide reply threads
         # This would need to be populated if the API supports it
-        
+
         return {
             **tweet_data,
             "quotes": quotes,
             "replies": replies
         }
-        
+
     except Exception as e:
         print(f"[BRONZE TWITTER] Error extracting tweet data: {e}")
         return None
@@ -209,13 +211,13 @@ def ingest_keyword(keyword: str, request_id: int):
     Fetches tweets for a keyword and stores in MongoDB.
     """
     keyword_id = int(request_id)
-    
+
     # Get date range from global_keywords
     start_date, end_date = get_date_range(keyword_id)
-    
+
     # Lock state
     mark_keyword_status(keyword_id, 'PROCESSING')
-    
+
     job_id = jobs_col.insert_one({
         "platform": "twitter",
         "keyword": keyword,
@@ -227,7 +229,7 @@ def ingest_keyword(keyword: str, request_id: int):
             "end_date": str(end_date) if end_date else None
         }
     }).inserted_id
-    
+
     operations = []
     processed = 0
     inserted = 0  # Initialize to avoid undefined variable error
@@ -235,21 +237,21 @@ def ingest_keyword(keyword: str, request_id: int):
     skipped_duplicate = 0
     errors = 0
     rate_limit_remaining = 0
-    
+
     print(f"[BRONZE TWITTER] Ingesting keyword: {keyword}")
     if start_date or end_date:
         print(f"[BRONZE TWITTER] Date range: {start_date} to {end_date}")
-    
+
     try:
         # Fetch tweets from RapidAPI
         tweets, rate_limit_remaining, error_msg = fetch_tweets(keyword, start_date, end_date)
-        
+
         if error_msg:
             raise Exception(error_msg)
-        
+
         if rate_limit_remaining < 5:
             print(f"[BRONZE TWITTER] WARNING: Low rate limit remaining: {rate_limit_remaining}")
-        
+
         for tweet in tweets:
             try:
                 # Extract and normalize tweet data
@@ -257,12 +259,12 @@ def ingest_keyword(keyword: str, request_id: int):
                 if not tweet_data:
                     errors += 1
                     continue
-                
+
                 # Filter non-English tweets
                 if tweet_data.get("lang") != "en":
                     skipped_non_english += 1
                     continue
-                
+
                 # Build MongoDB document
                 base_doc = {
                     "platform": "twitter",
@@ -276,7 +278,7 @@ def ingest_keyword(keyword: str, request_id: int):
                         "rate_limit_remaining": rate_limit_remaining
                     }
                 }
-                
+
                 # Upsert with deduplication
                 operations.append(
                     UpdateOne(
@@ -296,7 +298,7 @@ def ingest_keyword(keyword: str, request_id: int):
                     )
                 )
                 processed += 1
-                
+
             except Exception as e:
                 errors += 1
                 errors_col.insert_one({
@@ -307,20 +309,20 @@ def ingest_keyword(keyword: str, request_id: int):
                     "error_type": "parsing_error",
                     "occurred_at": datetime.now(timezone.utc)
                 })
-        
+
         # Bulk write to MongoDB
         inserted = 0
         if operations:
             result = bronze_col.bulk_write(operations, ordered=False)
             inserted = result.upserted_count + result.modified_count
-        
+
         # Update status
         if inserted > 0:
             mark_keyword_processed(keyword_id)
             mark_keyword_status(keyword_id, 'COMPLETED')
         else:
             mark_keyword_status(keyword_id, 'IDLE')
-        
+
     except Exception as e:
         mark_keyword_status(keyword_id, 'FAILED')
         errors_col.insert_one({
@@ -334,7 +336,7 @@ def ingest_keyword(keyword: str, request_id: int):
             }
         })
         print(f"[BRONZE TWITTER] Critical failure for {keyword}: {e}")
-    
+
     # Update job log
     jobs_col.update_one(
         {"_id": job_id},
@@ -361,6 +363,7 @@ def ingest_keyword(keyword: str, request_id: int):
 # ============================
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) > 2:
         keyword = sys.argv[1]
         request_id = int(sys.argv[2])

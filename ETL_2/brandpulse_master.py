@@ -13,6 +13,7 @@ from gold_layer import run_gold_etl
 load_dotenv()
 PG_DSN = os.getenv("POSTGRES_DSN")
 
+
 # CHANGE 1: Use requestId instead of keyword for updates
 def update_status_by_id(request_id, status):
     """Signals the current state to the MERN backend using the Request ID."""
@@ -39,7 +40,7 @@ def run_pipeline(keyword, request_id, platform='reddit'):
         print(f"[STEP 1/3] Ingesting raw {platform} data into MongoDB...")
         print(f"[DEBUG] Platform parameter received: '{platform}'")
         print(f"[DEBUG] Platform check: platform == 'twitter' is {platform == 'twitter'}")
-        
+
         if platform == 'twitter':
             print(f"[DEBUG] Calling ingest_twitter for keyword: {keyword}")
             ingest_twitter(keyword, request_id)
@@ -72,6 +73,7 @@ def run_pipeline(keyword, request_id, platform='reddit'):
 
 if __name__ == "__main__":
     import sys
+
     # Node.js passes [keyword, requestId, platform (optional)]
     if len(sys.argv) > 2:
         keyword = sys.argv[1]

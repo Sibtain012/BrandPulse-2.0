@@ -1,6 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
 
-// FIX: Use relative URL to leverage Vite proxy (avoids CORS & ERR_INTERNET_DISCONNECTED)
 const API = axios.create({
     baseURL: '/api/auth'
 });

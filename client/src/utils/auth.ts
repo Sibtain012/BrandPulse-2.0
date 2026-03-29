@@ -8,7 +8,7 @@ interface DecodedToken {
     email?: string;
     exp?: number;
     iat?: number;
-    [key: string]: any; // Allow any additional fields
+    [key: string]: any;
 }
 
 /**
@@ -27,7 +27,7 @@ export const decodeToken = (token: string): DecodedToken | null => {
                 .join('')
         );
         const decoded = JSON.parse(jsonPayload);
-        console.log('🔍 Decoded JWT token:', decoded); // Debug log
+        console.log('🔍 Decoded JWT token:', decoded);
         return decoded;
     } catch (error) {
         console.error('Failed to decode token:', error);

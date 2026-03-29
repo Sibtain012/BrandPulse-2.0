@@ -765,7 +765,7 @@ export const resendOTP = async (req, res) => {
         const otpHash = await hashOTP(otp);
         const otpExpiry = generateOTPExpiry();
 
-        // Update OTP in database (invalidates old OTP) - USES: otp_code, otp_expiry, otp_attempts, last_otp_sent_at
+        // Update OTP in database - USES: otp_code, otp_expiry, otp_attempts, last_otp_sent_at
         await pool.query(
             'UPDATE user_profiles SET otp_code = $1, otp_expiry = $2, otp_attempts = 0, last_otp_sent_at = NOW() WHERE user_id = $3 AND is_current = TRUE',
             [otpHash, otpExpiry, userId]
