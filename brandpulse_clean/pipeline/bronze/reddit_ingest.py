@@ -140,7 +140,6 @@ def extract_submission(submission):
 
     comments_data = []
     submission.comments.replace_more(limit=0)  # Get top comments only for speed
-    # OPTIMIZED: Limit to top 10 comments per post to reduce processing time
     for comment in submission.comments.list()[:10]:
         comments_data.append({
             "body": comment.body,
@@ -165,8 +164,6 @@ def ingest_keyword(row_or_keyword, request_id=None):
 
     if not keyword_id:
         raise ValueError("No Request ID provided for ingestion.")
-
-    search_limit = 5  # Preserved from original (unused local var)
 
     bronze_col, jobs_col, errors_col = get_mongo_collections()
     reddit = _get_reddit_client()

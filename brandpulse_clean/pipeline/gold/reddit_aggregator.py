@@ -17,7 +17,6 @@ SQL STATEMENTS:
     COALESCE fallbacks, and the ON CONFLICT constraint name are
     preserved verbatim.
 
-Twitter SQL (INSERT_TWEET_SENTIMENT_SQL) is intentionally excluded.
 """
 
 from database.postgres import get_pg_connection

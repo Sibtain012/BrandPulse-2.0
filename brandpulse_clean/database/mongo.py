@@ -67,12 +67,3 @@ def get_mongo_collections():
     return bronze_col, jobs_col, errors_col
 
 
-def get_mongo_database():
-    """
-    Return the BrandPulse_1 database handle directly.
-
-    Useful for accessing collections not in the standard triple
-    (e.g. bronze_raw_twitter_data in future).
-    """
-    client = _get_client()
-    return client["BrandPulse_1"]
