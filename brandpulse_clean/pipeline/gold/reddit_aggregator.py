@@ -46,7 +46,7 @@ SELECT
 FROM silver_reddit_posts sp
 JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
 JOIN dim_sentiment ds ON ds.sentiment_label = sp.post_sentiment_label
-LEFT JOIN dim_date dd ON dd.calendar_date = DATE(sp.created_at_utc)
+LEFT JOIN dim_date dd ON dd.date_actual = DATE(sp.created_at_utc)
 LEFT JOIN dim_time dt ON dt.time_id = (EXTRACT(HOUR FROM sp.created_at_utc) * 100 + EXTRACT(MINUTE FROM sp.created_at_utc))
 WHERE sp.global_keyword_id = %s
 AND sp.gold_processed = FALSE
