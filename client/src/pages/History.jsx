@@ -43,7 +43,6 @@ const History = () => {
             const response = await axios.get(`/api/data/history/${userId}`);
             setAnalyses(response.data.analyses || []);
         } catch (err) {
-            console.error('Failed to fetch history:', err);
             setError(err.response?.data?.error || 'Failed to load analysis history');
         } finally {
             setLoading(false);
@@ -65,7 +64,6 @@ const History = () => {
             );
             setAnalyses(response.data.analyses || []);
         } catch (err) {
-            console.error('Search failed:', err);
             setError('Search failed');
         } finally {
             setLoading(false);

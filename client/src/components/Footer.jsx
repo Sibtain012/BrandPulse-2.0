@@ -1,6 +1,4 @@
 import { TrendingUp, Twitter, Linkedin, Github, Facebook } from 'lucide-react';
-import { Link } from 'react-router-dom';
-
 const Footer = () => {
     return (
         <footer className="bg-light-900 text-light-300 py-16 border-t border-light-800">
@@ -30,8 +28,6 @@ const Footer = () => {
                         <ul className="space-y-2 text-sm">
                             <li><a href="#" className="hover:text-brand-400 transition-colors">Features</a></li>
                             <li><a href="#" className="hover:text-brand-400 transition-colors">Sentiment Analysis</a></li>
-                            {/* <li><a href="#" className="hover:text-brand-400 transition-colors">Crisis Detection</a></li> */}
-                            {/* <li><a href="#" className="hover:text-brand-400 transition-colors">Pricing</a></li> */}
                         </ul>
                     </div>
 
@@ -39,7 +35,6 @@ const Footer = () => {
                         <h4 className="text-white font-semibold mb-4">Company</h4>
                         <ul className="space-y-2 text-sm">
                             <li><a href="#" className="hover:text-brand-400 transition-colors">About Us</a></li>
-                            {/* <li><a href="#" className="hover:text-brand-400 transition-colors">Careers</a></li> */}
                             <li><a href="#" className="hover:text-brand-400 transition-colors">Blog</a></li>
                             <li><a href="#" className="hover:text-brand-400 transition-colors">Contact</a></li>
                         </ul>
@@ -59,8 +54,6 @@ const Footer = () => {
                 <div className="border-t border-light-800 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-light-500">
                     <p>© 2025 BrandPulse Inc. All rights reserved.</p>
                     <div className="flex gap-6">
-                        {/* <Link to="/login" className="hover:text-white">Admin Login</Link> */}
-                        {/* <a href="#" className="hover:text-white">System Status</a> */}
                     </div>
                 </div>
             </div>
