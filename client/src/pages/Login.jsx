@@ -8,7 +8,7 @@ import OTPInput from '../components/OTPInput';
 const Login = () => {
     const navigate = useNavigate();
 
-    // --- STATE ---
+
     const [step, setStep] = useState('credentials');
     const [formData, setFormData] = useState({ email: '', password: '' });
     const [error, setError] = useState(null);
@@ -16,7 +16,7 @@ const Login = () => {
     const [showPassword, setShowPassword] = useState(false);
     const [resendCooldown, setResendCooldown] = useState(0);
 
-    // --- HANDLERS ---
+
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.id]: e.target.value });
     };
@@ -102,7 +102,7 @@ const Login = () => {
         }
     }, [resendCooldown]);
 
-    // --- UI RENDER ---
+
     return (
         <div className="min-h-screen flex items-center justify-center p-6 bg-light-100 font-sans">
             <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-light-100 to-accent-teal-light/5 pointer-events-none" />

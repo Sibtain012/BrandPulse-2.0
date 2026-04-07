@@ -19,14 +19,15 @@ BUG FIX:
       Format B: comment["body"]
 
 KNOWN BUGS FLAGGED (DO NOT FIX):
-    - log_error_to_pg() references undefined variable e.
     - pipeline_runs and silver_errors PostgreSQL tables exist but are never written to.
     - analysis_history.dominant_sentiment has inconsistent casing: 'Neutral' vs 'neutral'.
     - ml_models collection shows cardiffnlp model but code uses bertweet.
 """
 
 from datetime import datetime, timezone
-import traceback
+from utils.logging import get_logger
+
+logger = get_logger("SILVER")
 
 from database.mongo import get_mongo_collections
 from database.postgres import get_pg_connection
@@ -50,7 +51,6 @@ def run_silver(request_id, batch_size=50):
     """
     Main Silver Layer process: Cleans data, runs RoBERTa sentiment,
     and persists to PostgreSQL with Transactional Integrity.
-    OPTIMIZED: Increased batch_size from 32 to 50 for faster processing.
     """
     pg_conn = get_pg_connection()
     cursor_pg = pg_conn.cursor()
@@ -79,8 +79,8 @@ def run_silver(request_id, batch_size=50):
         "global_keyword_id": rid  # Only process docs for THIS request
     }
     unprocessed_count = bronze_col.count_documents(query_filter)
-    print(f"[DEBUG] Silver Query Filter: {query_filter}")
-    print(f"[DEBUG] Total Unprocessed in Bronze for Request {rid}: {unprocessed_count}")
+    logger.debug("Silver Query Filter: %s", query_filter)
+    logger.debug("Total Unprocessed in Bronze for Request %s: %s", rid, unprocessed_count)
 
     # Use a small limit to prevent OOM (Out of Memory) crashes on 8GB RAM
     raw_docs = list(bronze_col.find(query_filter).limit(batch_size))
@@ -144,7 +144,7 @@ def run_silver(request_id, batch_size=50):
         print(f"[SILVER] Inference Crash: {e}")
         cursor_pg.close()
         pg_conn.close()
-        return
+        raise e
 
     # 5. PERSISTENCE PHASE: TRANSACTIONAL WRITE
     current_score_idx = 0

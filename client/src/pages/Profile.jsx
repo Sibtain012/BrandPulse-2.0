@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    User, Mail, Shield, Smartphone, LogOut, CheckCircle, AlertCircle,
+    User, Mail, Shield, LogOut, CheckCircle, AlertCircle,
     TrendingUp, Edit2, Save, X, Lock, Eye, EyeOff
 } from 'lucide-react';
 import API from '../utils/api';
@@ -123,7 +123,6 @@ const Profile = () => {
     };
 
     const handleVerifyOTP = async (otp) => {
-        console.log('[Profile 2FA] Verifying OTP:', otp);
         setMessage({ type: '', text: '' }); // Clear previous messages
 
         try {

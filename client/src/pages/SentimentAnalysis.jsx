@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAnalysis } from '../hooks/useAnalysis';
 import SentimentChart from '../components/SentimentChart';
 import axios from 'axios';
@@ -26,13 +26,20 @@ const SentimentAnalysis = () => {
     const [endDate, setEndDate] = useState('');
     const [sentimentData, setSentimentData] = useState(null);
     const [detailsData, setDetailsData] = useState(null);
-    const [ingestionStats, setIngestionStats] = useState(null);
     const [activeTab, setActiveTab] = useState('charts');
     const [historicalRequestId, setHistoricalRequestId] = useState(null);
     const [loadingMessage, setLoadingMessage] = useState('Starting analysis...');
     const [loadingResults, setLoadingResults] = useState(false);
     const { status, startAnalysis, activeRequestId } = useAnalysis();
     const [searchParams] = useSearchParams();
+    const navigate = useNavigate();
+    const timeoutRef = useRef(null);
+
+    useEffect(() => {
+        return () => {
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
+        };
+    }, []);
 
     // Fetch sentiment summary data with longer retry logic
     const fetchWithRetry = useCallback(async (rid, attempt = 1) => {
@@ -58,26 +65,18 @@ const SentimentAnalysis = () => {
                 // Also fetch detailed data for proof
                 const detailsRes = await axios.get(`/api/data/details/${rid}`);
                 setDetailsData(detailsRes.data);
-                // Fetch ingestion stats from MongoDB
-                const statsRes = await axios.get(`/api/data/ingestion-stats/${rid}`);
-                setIngestionStats(statsRes.data);
             } else if (attempt < 5) {
                 const delay = attempt * 3000; // Increased delay: 3s, 6s, 9s, 12s, etc.
-                console.warn(`⏳ Data not ready yet. Retry ${attempt}/5 in ${delay / 1000}s... (Request ID: ${rid})`);
-                setTimeout(() => fetchWithRetry(rid, attempt + 1), delay);
+                timeoutRef.current = setTimeout(() => fetchWithRetry(rid, attempt + 1), delay);
             } else {
-                console.error(`❌ Timeout: No data found after ${attempt} attempts for Request ID: ${rid}`);
                 setSentimentData(null);
                 setDetailsData(null);
-                setIngestionStats(null);
                 setLoadingResults(false);
             }
         } catch (err) {
-            console.error("Fetch Error:", err);
             if (attempt < 5) {
                 const delay = attempt * 3000;
-                console.warn(`⚠️ Fetch failed, retrying in ${delay / 1000}s...`);
-                setTimeout(() => fetchWithRetry(rid, attempt + 1), delay);
+                timeoutRef.current = setTimeout(() => fetchWithRetry(rid, attempt + 1), delay);
             } else {
                 setLoadingResults(false);
             }
@@ -91,16 +90,13 @@ const SentimentAnalysis = () => {
         // Get the actual logged-in user's ID from JWT token
         let userId = getCurrentUserId();
 
-        // TEMPORARY FALLBACK: Use ID 1 if JWT parsing fails (check browser console for details)
         if (!userId) {
-            console.warn('⚠️ Could not get user ID from JWT, using fallback ID: 1');
-            console.warn('⚠️ Check browser console for JWT structure details');
-            userId = 1; // Fallback to hardcoded ID
+            navigate('/login');
+            return;
         }
 
         setSentimentData(null);
         setDetailsData(null);
-        setIngestionStats(null);
         setActiveTab('charts');
 
         // Send dates to backend along with keyword and actual user ID (Reddit only)
@@ -108,7 +104,6 @@ const SentimentAnalysis = () => {
 
         // If cached results (≥75% coverage), immediately fetch the data
         if (result?.cached && result?.requestId) {
-            console.log('📦 Loading cached results with', result.cacheInfo?.coverage.toFixed(1), '% coverage');
             await fetchWithRetry(result.requestId, 1);
         }
     };
@@ -130,7 +125,6 @@ const SentimentAnalysis = () => {
         if (requestIdParam) {
             const rid = parseInt(requestIdParam, 10);
             if (!isNaN(rid)) {
-                console.log(`📂 Loading historical analysis for Request ID: ${rid}`);
                 setHistoricalRequestId(rid);
 
                 // Fetch the historical data
@@ -145,7 +139,7 @@ const SentimentAnalysis = () => {
                             setDetailsData(detailsRes.data);
                         }
                     } catch (err) {
-                        console.error('Failed to load historical data:', err);
+                        // Silent failure
                     }
                 };
                 loadHistoricalData();

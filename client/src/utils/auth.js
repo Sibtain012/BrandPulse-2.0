@@ -1,6 +1,3 @@
-// Utility to decode JWT and extract user information
-// This prevents hardcoding user IDs and gets the actual logged-in user
-
 /**
  * Decodes a JWT token and extracts the payload
  * @param token - JWT token string
@@ -17,7 +14,6 @@ export const decodeToken = (token) => {
                 .join('')
         );
         const decoded = JSON.parse(jsonPayload);
-        console.log('🔍 Decoded JWT token:', decoded);
         return decoded;
     } catch (error) {
         console.error('Failed to decode token:', error);
@@ -43,41 +39,11 @@ export const getCurrentUserId = () => {
         return null;
     }
 
-    // Try different possible field names for user ID
     const userId = decoded.userId || decoded.user_id || decoded.id;
 
     if (!userId) {
-        console.error('❌ No user ID found in token. Token payload:', decoded);
         return null;
     }
 
-    console.log('✅ Found user ID:', userId);
     return Number(userId);
-};
-
-/**
- * Gets the current logged-in user's email from localStorage JWT token
- * @returns User email or null if not logged in
- */
-export const getCurrentUserEmail = () => {
-    const token = localStorage.getItem('accessToken');
-    if (!token) return null;
-
-    const decoded = decodeToken(token);
-    return decoded?.email || null;
-};
-
-/**
- * Checks if the current token is expired
- * @returns true if expired or invalid, false otherwise
- */
-export const isTokenExpired = () => {
-    const token = localStorage.getItem('accessToken');
-    if (!token) return true;
-
-    const decoded = decodeToken(token);
-    if (!decoded || !decoded.exp) return true;
-
-    // Check if token expiration time (in seconds) is less than current time
-    return decoded.exp * 1000 < Date.now();
 };
