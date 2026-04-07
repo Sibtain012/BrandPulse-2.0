@@ -180,7 +180,8 @@ def run_silver(request_id, batch_size=50):
                     created_at_utc, processed_at_utc
                 )
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (original_bronze_id) DO NOTHING
+                ON CONFLICT (original_bronze_id) DO UPDATE
+                SET original_bronze_id = EXCLUDED.original_bronze_id
                 RETURNING silver_post_id
                 """,
                 (
