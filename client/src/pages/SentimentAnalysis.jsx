@@ -24,6 +24,7 @@ const SentimentAnalysis = () => {
     const [keyword, setKeyword] = useState('');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [platform, setPlatform] = useState('reddit');
     const [sentimentData, setSentimentData] = useState(null);
     const [detailsData, setDetailsData] = useState(null);
     const [activeTab, setActiveTab] = useState('charts');
@@ -55,7 +56,7 @@ const SentimentAnalysis = () => {
                 setLoadingMessage('Finalizing charts...');
             }
 
-            const res = await axios.get(`/api/data/results/${rid}`);
+            const res = await axios.get(`/api/data/results/${rid}?platform=${platform}`);
 
             if (res.data && res.data.totals && res.data.totals.total > 0) {
                 console.log(`✅ Data ready! Posts: ${res.data.totals.posts}, Comments: ${res.data.totals.comments}`);
@@ -63,7 +64,7 @@ const SentimentAnalysis = () => {
                 setSentimentData(res.data);
                 setLoadingResults(false);
                 // Also fetch detailed data for proof
-                const detailsRes = await axios.get(`/api/data/details/${rid}`);
+                const detailsRes = await axios.get(`/api/data/details/${rid}?platform=${platform}`);
                 setDetailsData(detailsRes.data);
             } else if (attempt < 5) {
                 const delay = attempt * 3000; // Increased delay: 3s, 6s, 9s, 12s, etc.
@@ -81,7 +82,7 @@ const SentimentAnalysis = () => {
                 setLoadingResults(false);
             }
         }
-    }, []);
+    }, [platform]);
 
     const handleRunPipeline = async (e) => {
         e.preventDefault();
@@ -99,8 +100,8 @@ const SentimentAnalysis = () => {
         setDetailsData(null);
         setActiveTab('charts');
 
-        // Send dates to backend along with keyword and actual user ID (Reddit only)
-        const result = await startAnalysis(keyword, userId, startDate || null, endDate || null, 'reddit');
+        // Send dates to backend along with keyword, user ID, and selected platform
+        const result = await startAnalysis(keyword, userId, startDate || null, endDate || null, platform);
 
         // If cached results (≥75% coverage), immediately fetch the data
         if (result?.cached && result?.requestId) {
@@ -130,12 +131,14 @@ const SentimentAnalysis = () => {
                 // Fetch the historical data
                 const loadHistoricalData = async () => {
                     try {
-                        const res = await axios.get(`/api/data/results/${rid}`);
+                        const histPlatform = searchParams.get('platform') || platform;
+                        const res = await axios.get(`/api/data/results/${rid}?platform=${histPlatform}`);
                         if (res.data && res.data.totals && res.data.totals.total > 0) {
                             setSentimentData(res.data);
+                            if (res.data.platform) setPlatform(res.data.platform);
 
                             // Also fetch details
-                            const detailsRes = await axios.get(`/api/data/details/${rid}`);
+                            const detailsRes = await axios.get(`/api/data/details/${rid}?platform=${histPlatform}`);
                             setDetailsData(detailsRes.data);
                         }
                     } catch (err) {
@@ -190,6 +193,35 @@ const SentimentAnalysis = () => {
                 {!historicalRequestId && (
                     <section className="bg-white p-6 rounded-xl shadow-sm border mb-8">
                         <form onSubmit={handleRunPipeline} className="space-y-4">
+                            {/* Platform selector */}
+                            <div className="flex items-center gap-4">
+                                <span className="text-sm font-semibold text-light-700">Platform:</span>
+                                <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer ${platform === 'reddit' ? 'bg-brand-50 border-brand-500 text-brand-700' : 'bg-white border-light-200 text-light-600'}`}>
+                                    <input
+                                        type="radio"
+                                        name="platform"
+                                        value="reddit"
+                                        checked={platform === 'reddit'}
+                                        onChange={(e) => setPlatform(e.target.value)}
+                                        disabled={status === 'PROCESSING'}
+                                        className="accent-brand-600"
+                                    />
+                                    <span className="text-sm font-medium">🟠 Reddit</span>
+                                </label>
+                                <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer ${platform === 'twitter' ? 'bg-brand-50 border-brand-500 text-brand-700' : 'bg-white border-light-200 text-light-600'}`}>
+                                    <input
+                                        type="radio"
+                                        name="platform"
+                                        value="twitter"
+                                        checked={platform === 'twitter'}
+                                        onChange={(e) => setPlatform(e.target.value)}
+                                        disabled={status === 'PROCESSING'}
+                                        className="accent-brand-600"
+                                    />
+                                    <span className="text-sm font-medium">🐦 Twitter</span>
+                                </label>
+                            </div>
+
                             {/* Keyword Input */}
                             <div className="flex flex-col sm:flex-row gap-4">
                                 <input
@@ -295,23 +327,38 @@ const SentimentAnalysis = () => {
                 {(status === 'COMPLETED' || historicalRequestId) && hasData ? (
                     <div className="space-y-8">
                         {/* Summary Stats */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div className="bg-gradient-to-br from-brand-500 to-brand-600 p-6 rounded-xl text-white">
-                                <p className="text-brand-100 text-sm font-medium">Total Analyzed</p>
-                                <p className="text-4xl font-bold">{sentimentData.totals.total}</p>
-                                <p className="text-brand-200 text-xs mt-1">posts + comments</p>
+                        {platform === 'twitter' ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div className="bg-gradient-to-br from-brand-500 to-brand-600 p-6 rounded-xl text-white">
+                                    <p className="text-brand-100 text-sm font-medium">Total Analyzed</p>
+                                    <p className="text-4xl font-bold">{sentimentData.totals.total}</p>
+                                    <p className="text-brand-200 text-xs mt-1">tweets</p>
+                                </div>
+                                <div className="bg-gradient-to-br from-accent-blue to-accent-blue-dark p-6 rounded-xl text-white">
+                                    <p className="text-white/80 text-sm font-medium">Tweets</p>
+                                    <p className="text-4xl font-bold">{sentimentData.totals.posts}</p>
+                                    <p className="text-white/70 text-xs mt-1">Twitter posts</p>
+                                </div>
                             </div>
-                            <div className="bg-gradient-to-br from-accent-teal to-accent-teal-dark p-6 rounded-xl text-white">
-                                <p className="text-white/80 text-sm font-medium">Posts</p>
-                                <p className="text-4xl font-bold">{sentimentData.totals.posts}</p>
-                                <p className="text-white/70 text-xs mt-1">Reddit submissions</p>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div className="bg-gradient-to-br from-brand-500 to-brand-600 p-6 rounded-xl text-white">
+                                    <p className="text-brand-100 text-sm font-medium">Total Analyzed</p>
+                                    <p className="text-4xl font-bold">{sentimentData.totals.total}</p>
+                                    <p className="text-brand-200 text-xs mt-1">posts + comments</p>
+                                </div>
+                                <div className="bg-gradient-to-br from-accent-teal to-accent-teal-dark p-6 rounded-xl text-white">
+                                    <p className="text-white/80 text-sm font-medium">Posts</p>
+                                    <p className="text-4xl font-bold">{sentimentData.totals.posts}</p>
+                                    <p className="text-white/70 text-xs mt-1">Reddit submissions</p>
+                                </div>
+                                <div className="bg-gradient-to-br from-accent-blue to-accent-blue-dark p-6 rounded-xl text-white">
+                                    <p className="text-white/80 text-sm font-medium">Comments</p>
+                                    <p className="text-4xl font-bold">{sentimentData.totals.comments}</p>
+                                    <p className="text-white/70 text-xs mt-1">user responses</p>
+                                </div>
                             </div>
-                            <div className="bg-gradient-to-br from-accent-blue to-accent-blue-dark p-6 rounded-xl text-white">
-                                <p className="text-white/80 text-sm font-medium">Comments</p>
-                                <p className="text-4xl font-bold">{sentimentData.totals.comments}</p>
-                                <p className="text-white/70 text-xs mt-1">user responses</p>
-                            </div>
-                        </div>
+                        )}
 
 
                         {/* Tab Navigation */}
@@ -325,43 +372,108 @@ const SentimentAnalysis = () => {
                             >
                                 📊 Charts
                             </button>
-                            <button
-                                onClick={() => setActiveTab('posts')}
-                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'posts'
-                                    ? 'text-brand-600 border-b-2 border-brand-600'
-                                    : 'text-light-500 hover:text-light-700'
-                                    }`}
-                            >
-                                📝 Posts ({currentDetailsData?.posts.length || 0})
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('comments')}
-                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'comments'
-                                    ? 'text-brand-600 border-b-2 border-brand-600'
-                                    : 'text-light-500 hover:text-light-700'
-                                    }`}
-                            >
-                                💬 Comments ({currentDetailsData?.comments.length || 0})
-                            </button>
+                            {platform === 'twitter' ? (
+                                <button
+                                    onClick={() => setActiveTab('tweets')}
+                                    className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'tweets'
+                                        ? 'text-brand-600 border-b-2 border-brand-600'
+                                        : 'text-light-500 hover:text-light-700'
+                                        }`}
+                                >
+                                    🐦 Tweets ({currentDetailsData?.tweets?.length || 0})
+                                </button>
+                            ) : (
+                                <>
+                                    <button
+                                        onClick={() => setActiveTab('posts')}
+                                        className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'posts'
+                                            ? 'text-brand-600 border-b-2 border-brand-600'
+                                            : 'text-light-500 hover:text-light-700'
+                                            }`}
+                                    >
+                                        📝 Posts ({currentDetailsData?.posts?.length || 0})
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('comments')}
+                                        className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'comments'
+                                            ? 'text-brand-600 border-b-2 border-brand-600'
+                                            : 'text-light-500 hover:text-light-700'
+                                            }`}
+                                    >
+                                        💬 Comments ({currentDetailsData?.comments?.length || 0})
+                                    </button>
+                                </>
+                            )}
                         </div>
 
                         {/* Tab Content */}
                         {activeTab === 'charts' && (
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                <div className="bg-white p-6 rounded-xl shadow-lg border">
-                                    <SentimentChart
-                                        data={sentimentData.posts}
-                                        title="Post Sentiment"
-                                        subtitle={`Based on ${sentimentData.totals.posts} Reddit posts${isFiltered ? ' (filtered)' : ''}`}
-                                    />
+                            platform === 'twitter' ? (
+                                <div className="grid grid-cols-1 gap-6">
+                                    <div className="bg-white p-6 rounded-xl shadow-lg border">
+                                        <SentimentChart
+                                            data={sentimentData.posts}
+                                            title="Tweet Sentiment"
+                                            subtitle={`Based on ${sentimentData.totals.posts} tweets${isFiltered ? ' (filtered)' : ''}`}
+                                        />
+                                    </div>
                                 </div>
-                                <div className="bg-white p-6 rounded-xl shadow-lg border">
-                                    <SentimentChart
-                                        data={sentimentData.comments}
-                                        title="Comment Sentiment"
-                                        subtitle={`Based on ${sentimentData.totals.comments} user comments${isFiltered ? ' (filtered)' : ''}`}
-                                    />
+                            ) : (
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                    <div className="bg-white p-6 rounded-xl shadow-lg border">
+                                        <SentimentChart
+                                            data={sentimentData.posts}
+                                            title="Post Sentiment"
+                                            subtitle={`Based on ${sentimentData.totals.posts} Reddit posts${isFiltered ? ' (filtered)' : ''}`}
+                                        />
+                                    </div>
+                                    <div className="bg-white p-6 rounded-xl shadow-lg border">
+                                        <SentimentChart
+                                            data={sentimentData.comments}
+                                            title="Comment Sentiment"
+                                            subtitle={`Based on ${sentimentData.totals.comments} user comments${isFiltered ? ' (filtered)' : ''}`}
+                                        />
+                                    </div>
                                 </div>
+                            )
+                        )}
+
+                        {activeTab === 'tweets' && currentDetailsData && platform === 'twitter' && (
+                            <div className="space-y-4">
+                                <p className="text-sm text-light-500">
+                                    Showing {currentDetailsData.tweets?.length || 0} tweets analyzed
+                                    {isFiltered && ' (filtered by date range)'}
+                                </p>
+                                {(!currentDetailsData.tweets || currentDetailsData.tweets.length === 0) ? (
+                                    <div className="p-6 bg-light-50 text-light-600 rounded-lg border text-center">
+                                        No tweets found in the selected date range.
+                                    </div>
+                                ) : (
+                                    currentDetailsData.tweets.map((tweet) => (
+                                        <div key={tweet.id} className="bg-white p-5 rounded-xl border shadow-sm hover:shadow-md transition-shadow">
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                                        <span className="text-xs text-light-400 bg-light-100 px-2 py-0.5 rounded">🐦 Twitter</span>
+                                                        <span className="text-xs text-light-400">{formatDate(tweet.created_at)}</span>
+                                                        <span className="text-xs text-light-400">❤️ {tweet.score}</span>
+                                                        <span className="text-xs text-light-400">🔁 {tweet.retweet_count}</span>
+                                                        <span className="text-xs text-light-400">💬 {tweet.reply_count}</span>
+                                                    </div>
+                                                    <p className="text-sm text-light-700 leading-relaxed whitespace-pre-wrap">
+                                                        {tweet.body}
+                                                    </p>
+                                                </div>
+                                                <div className="flex-shrink-0">
+                                                    <SentimentBadge
+                                                        sentiment={tweet.sentiment}
+                                                        confidence={tweet.confidence}
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))
+                                )}
                             </div>
                         )}
 

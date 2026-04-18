@@ -16,25 +16,41 @@ ARCHITECTURAL FIX:
 
 from pipeline.bronze.reddit_ingest import ingest_keyword as ingest_reddit
 from pipeline.silver.reddit_processor import run_silver as process_reddit
+from pipeline.bronze.twitter_ingest import ingest_keyword as ingest_twitter
+from pipeline.silver.twitter_processor import run_silver_twitter
 from pipeline.gold.aggregator import run_gold_etl
 
 
 class RedditPipeline:
     """Standardized interface for executing Reddit ETL stages."""
-    
+
     def ingest(self, keyword, request_id):
         ingest_reddit(keyword, request_id)
-        
+
     def process(self, request_id):
         process_reddit(request_id)
-        
+
     def aggregate(self, keyword, request_id):
         run_gold_etl(keyword, request_id, platform='reddit')
+
+
+class TwitterPipeline:
+    """Standardized interface for executing Twitter ETL stages."""
+
+    def ingest(self, keyword, request_id):
+        ingest_twitter(keyword, request_id)
+
+    def process(self, request_id):
+        run_silver_twitter(request_id)
+
+    def aggregate(self, keyword, request_id):
+        run_gold_etl(keyword, request_id, platform='twitter')
 
 
 # Central registry mapping platform names to Runner implementations
 PLATFORM_REGISTRY = {
     'reddit': RedditPipeline,
+    'twitter': TwitterPipeline,
 }
 
 

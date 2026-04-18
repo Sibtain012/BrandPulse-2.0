@@ -35,6 +35,11 @@ REDDIT_CLIENT_SECRET: str = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT: str = os.getenv("REDDIT_USER_AGENT", "BrandPulse-Ingestor/1.0")
 
 # ---------------------------------------------------------------------------
+# Twitter / RapidAPI
+# ---------------------------------------------------------------------------
+RAPIDAPI_KEY: str = os.getenv("RAPIDAPI_KEY", "")
+
+# ---------------------------------------------------------------------------
 # Sentiment Model
 # ---------------------------------------------------------------------------
 # Default matches the model used in ETL_2/silver_layer.py line 35.
