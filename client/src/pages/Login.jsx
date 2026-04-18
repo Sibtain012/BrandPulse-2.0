@@ -3,10 +3,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, AlertCircle, TrendingUp, Eye, EyeOff, ArrowLeft } from 'lucide-react';
 import API from '../utils/api';
 import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
 import OTPInput from '../components/OTPInput';
 
 const Login = () => {
     const navigate = useNavigate();
+    const { login } = useAuth();
 
 
     const [step, setStep] = useState('credentials');
@@ -43,8 +45,7 @@ const Login = () => {
                 return;
             }
 
-            localStorage.setItem('accessToken', res.data.accessToken);
-            localStorage.setItem('refreshToken', res.data.refreshToken);
+            login(res.data.accessToken, res.data.refreshToken);
             navigate('/', { replace: true });
 
         } catch (err) {
@@ -64,8 +65,7 @@ const Login = () => {
 
         try {
             const res = await API.post('/login', { ...formData, token: otp });
-            localStorage.setItem('accessToken', res.data.accessToken);
-            localStorage.setItem('refreshToken', res.data.refreshToken);
+            login(res.data.accessToken, res.data.refreshToken);
             navigate('/', { replace: true });
         } catch (err) {
             if (axios.isAxiosError(err) && err.response) {

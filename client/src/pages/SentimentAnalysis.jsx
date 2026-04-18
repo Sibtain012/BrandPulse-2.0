@@ -59,7 +59,7 @@ const SentimentAnalysis = () => {
 
             if (res.data && res.data.totals && res.data.totals.total > 0) {
                 console.log(`✅ Data ready! Posts: ${res.data.totals.posts}, Comments: ${res.data.totals.comments}`);
-                setLoadingMessage('Analysis complete!');
+                setLoadingMessage('Analysis in Progress!');
                 setSentimentData(res.data);
                 setLoadingResults(false);
                 // Also fetch detailed data for proof
