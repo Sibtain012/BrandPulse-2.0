@@ -40,14 +40,7 @@ jobs:
 
     - name: Test backend startup (non-blocking)
       run: |
-        timeout 10s python main.py || echo "Backend test completed (may have exited as expected)"
-        npm install
-
-    - name: Build frontend
-      run: |
-        cd client
->>>>>>> aaabc5611427f154d96f9b899790b39b280d06d8
-        npm run build
+        python main.py || echo "Backend test completed (may have exited as expected)"
 
     - name: Setup Python
       uses: actions/setup-python@v5
