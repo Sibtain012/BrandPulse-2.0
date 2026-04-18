@@ -7,6 +7,8 @@ import Register from './pages/Registration';
 import Profile from './pages/Profile';
 import Landing from './pages/Landing';
 import SentimentAnalysis from './pages/SentimentAnalysis';
+import ComplaintAnalyzer from './pages/ComplaintAnalyzer';
+import IntentClassifier from './pages/IntentClassifier';
 import History from './pages/History';
 
 function App() {
@@ -24,6 +26,18 @@ function App() {
         <Route path="/sentiment-analysis" element={
           <ProtectedRoute>
             <SentimentAnalysis />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/complaint-analyzer" element={
+          <ProtectedRoute>
+            <ComplaintAnalyzer />
+          </ProtectedRoute>
+        } />
+
+        <Route path="/intent-classifier" element={
+          <ProtectedRoute>
+            <IntentClassifier />
           </ProtectedRoute>
         } />
 

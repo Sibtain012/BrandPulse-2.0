@@ -76,6 +76,27 @@ const Header = () => {
                             {isProfileMenuOpen && (
                                 <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-lg border border-light-200 py-2 animate-fade-in">
                                     <Link
+                                        to="/sentiment-analysis"
+                                        className="flex items-center gap-3 px-4 py-2 text-sm text-light-700 hover:bg-light-50 transition-colors"
+                                        onClick={() => setIsProfileMenuOpen(false)}
+                                    >
+                                        📊 Sentiment Analysis
+                                    </Link>
+                                    <Link
+                                        to="/complaint-analyzer"
+                                        className="flex items-center gap-3 px-4 py-2 text-sm text-light-700 hover:bg-light-50 transition-colors"
+                                        onClick={() => setIsProfileMenuOpen(false)}
+                                    >
+                                        🚨 Complaint Analyzer
+                                    </Link>
+                                    <Link
+                                        to="/intent-classifier"
+                                        className="flex items-center gap-3 px-4 py-2 text-sm text-light-700 hover:bg-light-50 transition-colors"
+                                        onClick={() => setIsProfileMenuOpen(false)}
+                                    >
+                                        🎯 Intent Classifier
+                                    </Link>
+                                    <Link
                                         to="/history"
                                         className="flex items-center gap-3 px-4 py-2 text-sm text-light-700 hover:bg-light-50 transition-colors"
                                         onClick={() => setIsProfileMenuOpen(false)}
@@ -133,6 +154,27 @@ const Header = () => {
                         <hr className="border-light-200" />
                         {isLoggedIn ? (
                             <>
+                                <Link
+                                    to="/sentiment-analysis"
+                                    className="text-light-900 font-medium py-2"
+                                    onClick={() => setIsMobileMenuOpen(false)}
+                                >
+                                    📊 Sentiment Analysis
+                                </Link>
+                                <Link
+                                    to="/complaint-analyzer"
+                                    className="text-light-900 font-medium py-2"
+                                    onClick={() => setIsMobileMenuOpen(false)}
+                                >
+                                    🚨 Complaint Analyzer
+                                </Link>
+                                <Link
+                                    to="/intent-classifier"
+                                    className="text-light-900 font-medium py-2"
+                                    onClick={() => setIsMobileMenuOpen(false)}
+                                >
+                                    🎯 Intent Classifier
+                                </Link>
                                 <Link
                                     to="/history"
                                     className="text-light-900 font-medium py-2"

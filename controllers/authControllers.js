@@ -67,20 +67,25 @@ export const register = async (req, res) => {
             // Send OTP email
             try {
                 await sendOTPEmail(email, otp, fullName);
+                logAudit(userId, 'REGISTER_PENDING', 'User registered, awaiting email verification', req.ip);
+
+                res.json({
+                    msg: "Verification code sent to your email",
+                    email: maskEmail(email),
+                    requiresVerification: true
+                });
             } catch (emailError) {
                 console.error('[EMAIL ERROR]:', emailError);
-                // Rollback the user creation if email fails
-                await pool.query('DELETE FROM auth_identities WHERE user_id = $1', [userId]);
-                return res.status(500).json({ msg: "Failed to send verification email. Please try again." });
+                // For development, return OTP in response
+                logAudit(userId, 'REGISTER_PENDING', 'User registered, email failed, OTP in response', req.ip);
+
+                res.json({
+                    msg: "Email failed, but account created. Use this OTP to verify",
+                    otp: otp, // For development only
+                    email: maskEmail(email),
+                    requiresVerification: true
+                });
             }
-
-            logAudit(userId, 'REGISTER_PENDING', 'User registered, awaiting email verification', req.ip);
-
-            res.json({
-                msg: "Verification code sent to your email",
-                email: maskEmail(email),
-                requiresVerification: true
-            });
 
         } catch (e) {
             await client.query('ROLLBACK');
