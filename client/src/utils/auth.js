@@ -47,3 +47,15 @@ export const getCurrentUserId = () => {
 
     return Number(userId);
 };
+
+/**
+ * Returns true if accessToken exists in localStorage and is not expired.
+ */
+export const isTokenValid = () => {
+    const token = localStorage.getItem('accessToken');
+    if (!token) return false;
+    const decoded = decodeToken(token);
+    if (!decoded) return false;
+    if (!decoded.exp) return true; // no expiry claim → treat as valid
+    return decoded.exp * 1000 > Date.now();
+};

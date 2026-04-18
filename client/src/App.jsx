@@ -1,5 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
+import GuestRoute from './components/GuestRoute';
 import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
@@ -10,40 +12,27 @@ import SentimentAnalysis from './pages/SentimentAnalysis';
 import History from './pages/History';
 
 function App() {
-  return (
-    <Router>
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
+    return (
+        <Router>
+            <AuthProvider>
+                <Routes>
+                    {/* Public */}
+                    <Route path="/" element={<Landing />} />
 
-        {/* Protected Routes - Require Authentication */}
-        <Route path="/sentiment-analysis" element={
-          <ProtectedRoute>
-            <SentimentAnalysis />
-          </ProtectedRoute>
-        } />
+                    {/* Guest Routes — authenticated users are redirected to / */}
+                    <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+                    <Route path="/register" element={<GuestRoute><Register /></GuestRoute>} />
+                    <Route path="/forgot-password" element={<GuestRoute><ForgotPassword /></GuestRoute>} />
+                    <Route path="/reset-password" element={<GuestRoute><ResetPassword /></GuestRoute>} />
 
-        <Route path="/history" element={
-          <ProtectedRoute>
-            <History />
-          </ProtectedRoute>
-        } />
-
-        <Route path="/profile" element={
-          <ProtectedRoute>
-            <Profile />
-          </ProtectedRoute>
-        } />
-
-        {/* Default Redirect */}
-        <Route path="/" element={<Login />} />
-      </Routes>
-    </Router>
-  );
+                    {/* Protected Routes — unauthenticated users are redirected to /login */}
+                    <Route path="/sentiment-analysis" element={<ProtectedRoute><SentimentAnalysis /></ProtectedRoute>} />
+                    <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
+                    <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+                </Routes>
+            </AuthProvider>
+        </Router>
+    );
 }
 
 export default App;
