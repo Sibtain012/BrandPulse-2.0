@@ -21,7 +21,34 @@ async function getMongoDb() {
 router.get("/results/:requestId", async (req, res) => {
     try {
         const rid = parseInt(req.params.requestId);
-        console.log(`[API] Fetching results for Request ID: ${rid}`);
+        const platform = (req.query.platform || 'reddit').toString().toLowerCase();
+        console.log(`[API] Fetching results for Request ID: ${rid} (platform: ${platform})`);
+
+        if (platform === 'twitter') {
+            const tweetsResult = await pool.query(`
+                SELECT
+                    st.tweet_sentiment_label as name,
+                    COUNT(*)::INT as value
+                FROM silver_twitter_tweets st
+                JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
+                JOIN dim_sentiment ds ON ds.sentiment_label = st.tweet_sentiment_label
+                WHERE st.global_keyword_id = $1
+                AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
+                AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
+                GROUP BY st.tweet_sentiment_label, ds.sentiment_order
+                ORDER BY ds.sentiment_order ASC
+            `, [rid]);
+
+            const tweetTotal = tweetsResult.rows.reduce((sum, r) => sum + r.value, 0);
+            console.log(`[API] Found ${tweetTotal} tweets for ID ${rid} (Twitter)`);
+
+            return res.json({
+                posts: tweetsResult.rows,
+                comments: [],
+                totals: { posts: tweetTotal, comments: 0, total: tweetTotal },
+                platform: 'twitter'
+            });
+        }
 
         // Reddit: Query silver tables
         const postsResult = await pool.query(`
@@ -77,7 +104,41 @@ router.get("/results/:requestId", async (req, res) => {
 router.get("/details/:requestId", async (req, res) => {
     try {
         const rid = parseInt(req.params.requestId);
-        console.log(`[API] Fetching detailed data for Request ID: ${rid}`);
+        const platform = (req.query.platform || 'reddit').toString().toLowerCase();
+        console.log(`[API] Fetching detailed data for Request ID: ${rid} (platform: ${platform})`);
+
+        if (platform === 'twitter') {
+            const tweetsResult = await pool.query(`
+                SELECT
+                    st.silver_tweet_id as id,
+                    st.tweet_id as tweet_id,
+                    st.text_clean as body,
+                    st.tweet_url as url,
+                    st.favorite_count as score,
+                    st.retweet_count as retweet_count,
+                    st.reply_count as reply_count,
+                    st.quote_count as quote_count,
+                    st.tweet_sentiment_label as sentiment,
+                    st.tweet_sentiment_score as confidence,
+                    st.tweet_created_at as created_at
+                FROM silver_twitter_tweets st
+                JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
+                WHERE st.global_keyword_id = $1
+                AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
+                AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
+                ORDER BY st.favorite_count DESC
+                LIMIT 100
+            `, [rid]);
+
+            console.log(`[API] Found ${tweetsResult.rows.length} tweets details (Twitter)`);
+
+            return res.json({
+                posts: [],
+                comments: [],
+                tweets: tweetsResult.rows,
+                platform: 'twitter'
+            });
+        }
 
         // Reddit: Fetch posts and comments
         const postsResult = await pool.query(`

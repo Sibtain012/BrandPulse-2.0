@@ -14,6 +14,7 @@ ARCHITECTURAL FIX:
 """
 
 from pipeline.gold.reddit_aggregator import run_reddit_gold
+from pipeline.gold.twitter_aggregator import run_twitter_gold
 
 
 def run_gold_etl(keyword, request_id, platform='reddit'):
@@ -36,5 +37,7 @@ def run_gold_etl(keyword, request_id, platform='reddit'):
     """
     if platform == 'reddit':
         run_reddit_gold(keyword, request_id)
+    elif platform == 'twitter':
+        run_twitter_gold(keyword, request_id)
     else:
         raise ValueError(f"Unsupported platform: {platform}")

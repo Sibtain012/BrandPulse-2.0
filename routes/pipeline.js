@@ -5,6 +5,106 @@ import { calculateCacheCoverage } from "./cacheHelper.js";
 
 const router = Router();
 
+// Twitter: save completed analysis to history (tweets counted as posts, comments=0)
+async function saveTwitterAnalysisToHistory(
+  requestId,
+  keyword,
+  userId,
+  startDate,
+  endDate,
+) {
+  try {
+    console.log(
+      `[History] Starting to save Twitter analysis for Request ID: ${requestId}`,
+    );
+
+    const tweetsQuery = await pool.query(
+      `
+            SELECT
+                COUNT(*) as tweet_count,
+                COUNT(*) FILTER (WHERE LOWER(tweet_sentiment_label) = 'positive') as positive_tweets,
+                COUNT(*) FILTER (WHERE LOWER(tweet_sentiment_label) = 'neutral') as neutral_tweets,
+                COUNT(*) FILTER (WHERE LOWER(tweet_sentiment_label) = 'negative') as negative_tweets,
+                AVG(tweet_sentiment_score) as avg_tweet_score
+            FROM silver_twitter_tweets st
+            JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
+            WHERE st.global_keyword_id = $1
+            AND tweet_sentiment_label IS NOT NULL
+            AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
+            AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
+        `,
+      [requestId],
+    );
+
+    const tweets = tweetsQuery.rows[0];
+    const totalTweets = parseInt(tweets.tweet_count) || 0;
+
+    if (totalTweets === 0) {
+      console.log(
+        `[History] No Twitter sentiment data for Request ID: ${requestId}, skipping save`,
+      );
+      return;
+    }
+
+    const sentimentCounts = {
+      Positive: parseInt(tweets.positive_tweets) || 0,
+      Neutral: parseInt(tweets.neutral_tweets) || 0,
+      Negative: parseInt(tweets.negative_tweets) || 0,
+    };
+
+    const dominantSentiment = Object.keys(sentimentCounts).reduce((a, b) =>
+      sentimentCounts[a] > sentimentCounts[b] ? a : b,
+    );
+
+    const avgTweetScore = parseFloat(tweets.avg_tweet_score) || 0;
+
+    await pool.query(
+      `
+            INSERT INTO analysis_history (
+                keyword, user_id, start_date, end_date,
+                total_posts, total_comments,
+                dominant_sentiment, avg_sentiment_score,
+                avg_post_sentiment_score, avg_comment_sentiment_score,
+                request_id, platform_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            ON CONFLICT (user_id, keyword, start_date, end_date, platform_id)
+            DO UPDATE SET
+                total_posts = EXCLUDED.total_posts,
+                total_comments = EXCLUDED.total_comments,
+                dominant_sentiment = EXCLUDED.dominant_sentiment,
+                avg_sentiment_score = EXCLUDED.avg_sentiment_score,
+                avg_post_sentiment_score = EXCLUDED.avg_post_sentiment_score,
+                avg_comment_sentiment_score = EXCLUDED.avg_comment_sentiment_score,
+                analysis_timestamp = CURRENT_TIMESTAMP
+        `,
+      [
+        keyword,
+        userId,
+        startDate,
+        endDate,
+        totalTweets,
+        0,
+        dominantSentiment,
+        avgTweetScore,
+        avgTweetScore,
+        null,
+        requestId,
+        2, // platform_id = 2 (Twitter)
+      ],
+    );
+
+    console.log(
+      `[History] Saved Twitter analysis for Request ID: ${requestId} (${totalTweets} tweets, dominant: ${dominantSentiment})`,
+    );
+  } catch (error) {
+    console.error(
+      "[History] Error saving Twitter analysis_history:",
+      error.message,
+    );
+    throw error;
+  }
+}
+
 // Helper function to save completed analysis to history (Reddit only)
 async function saveAnalysisToHistory(
   requestId,
@@ -157,8 +257,22 @@ router.get("/status/id/:requestId", async (req, res) => {
 });
 
 router.post("/analyze", async (req, res) => {
-  // 1. EXTRACT ALL REQUIRED DATA FROM BODY (Reddit only, ignore platform parameter)
-  const { keyword, user_id, start_date, end_date } = req.body;
+  // 1. EXTRACT ALL REQUIRED DATA FROM BODY
+  const {
+    keyword,
+    user_id,
+    start_date,
+    end_date,
+    platform: rawPlatform,
+  } = req.body;
+
+  // Normalize + validate platform
+  const platform = (rawPlatform || "reddit").toString().toLowerCase();
+  const PLATFORM_IDS = { reddit: 1, twitter: 2 };
+  if (!(platform in PLATFORM_IDS)) {
+    return res.status(400).json({ error: `Unsupported platform: ${platform}` });
+  }
+  const platformId = PLATFORM_IDS[platform];
 
   // DEBUG: Log what we received
   console.log("[API DEBUG] Received request:", {
@@ -166,20 +280,17 @@ router.post("/analyze", async (req, res) => {
     user_id,
     start_date,
     end_date,
-    platform: "reddit",
+    platform,
   });
 
   if (!keyword || !user_id) {
     return res.status(400).json({ error: "Keyword and User ID are required" });
   }
 
-  // Default to current date if no dates provided
-  const today = new Date().toISOString().split("T")[0]; // Format: YYYY-MM-DD
-  const finalStartDate = start_date || today;
-  const finalEndDate = end_date || today;
-
-  // Get platform_id (1 = Reddit only)
-  const platformId = 1;
+  // If no dates provided, pass NULL through so gold filter does not narrow to today.
+  // global_keywords.start_date / end_date are nullable; gold SQL treats NULL as "no filter".
+  const finalStartDate = start_date || null;
+  const finalEndDate = end_date || null;
 
   try {
     // 2. SMART CACHE: Check for existing data with coverage calculation
@@ -219,16 +330,18 @@ router.post("/analyze", async (req, res) => {
       "[Cache] Cache miss or insufficient coverage, running fresh pipeline",
     );
 
-    // 3. CREATE NEW RECORD (allow multiple analyses of same keyword)
+    // 3. CREATE NEW RECORD (allow multiple analyses of same keyword per platform)
     const result = await pool.query(
       `
             INSERT INTO global_keywords (keyword, user_id, platform_id, status, bronze_processed, last_run_at, start_date, end_date)
             VALUES ($1, $2, $3, 'PROCESSING', FALSE, NOW(), $4, $5)
-            ON CONFLICT ON CONSTRAINT unique_user_keyword_request
+            ON CONFLICT (user_id, keyword, platform_id)
             DO UPDATE SET
                 status = 'PROCESSING',
                 bronze_processed = FALSE,
-                last_run_at = NOW()
+                last_run_at = NOW(),
+                start_date = EXCLUDED.start_date,
+                end_date = EXCLUDED.end_date
             RETURNING global_keyword_id
         `,
       [keyword, user_id, platformId, finalStartDate, finalEndDate],
@@ -250,18 +363,18 @@ router.post("/analyze", async (req, res) => {
       console.error("CRITICAL: Environment variables for Python are missing!");
     }
 
-    // 6. SPAWN ORCHESTRATOR (Reddit only)
+    // 6. SPAWN ORCHESTRATOR
     console.log("[API DEBUG] Spawning Python with args:", [
       pythonScript,
       keyword,
       requestId.toString(),
-      "reddit",
+      platform,
     ]);
     const pythonProcess = spawn(pythonExe, [
       pythonScript,
       keyword,
       requestId.toString(), // Request ID
-      "reddit", // Platform (Reddit only)
+      platform, // Platform (reddit | twitter)
     ]);
     pythonProcess.stdout.on("data", (data) =>
       console.log(`Python Output: ${data}`),
@@ -284,15 +397,25 @@ router.post("/analyze", async (req, res) => {
           [requestId],
         );
 
-        // Save results to analysis_history
+        // Save results to analysis_history (route by platform)
         try {
-          await saveAnalysisToHistory(
-            requestId,
-            keyword,
-            user_id,
-            finalStartDate,
-            finalEndDate,
-          );
+          if (platform === "twitter") {
+            await saveTwitterAnalysisToHistory(
+              requestId,
+              keyword,
+              user_id,
+              finalStartDate,
+              finalEndDate,
+            );
+          } else {
+            await saveAnalysisToHistory(
+              requestId,
+              keyword,
+              user_id,
+              finalStartDate,
+              finalEndDate,
+            );
+          }
           console.log(
             `✅ Analysis results saved to history (ID: ${requestId})`,
           );
