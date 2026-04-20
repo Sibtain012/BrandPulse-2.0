@@ -5,6 +5,7 @@ import SentimentChart from '../components/SentimentChart';
 import axios from 'axios';
 import { getCurrentUserId } from '../utils/auth';
 import Header from '../components/Header';
+import TrendChart from '../components/TrendChart';
 
 // Sentiment badge component
 const SentimentBadge = ({ sentiment, confidence }) => {
@@ -404,6 +405,15 @@ const SentimentAnalysis = () => {
                                     </button>
                                 </>
                             )}
+                            <button
+                                onClick={() => setActiveTab('trends')}
+                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'trends'
+                                    ? 'text-brand-600 border-b-2 border-brand-600'
+                                    : 'text-light-500 hover:text-light-700'
+                                    }`}
+                            >
+                                📈 Trends
+                            </button>
                         </div>
 
                         {/* Tab Content */}
@@ -533,6 +543,13 @@ const SentimentAnalysis = () => {
                                     ))
                                 )}
                             </div>
+                        )}
+
+                        {activeTab === 'trends' && (
+                            <TrendChart
+                                requestId={historicalRequestId || activeRequestId}
+                                platform={platform}
+                            />
                         )}
 
                         {activeTab === 'comments' && currentDetailsData && (

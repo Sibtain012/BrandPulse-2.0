@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { MongoClient } from "mongodb";
 import pool from "../db.js";
+import { verifyToken } from "../middleware/VerifyToken.js";
 
 const router = Router();
 
@@ -10,22 +11,25 @@ let mongoClient;
 let mongoDb;
 
 async function getMongoDb() {
-    if (!mongoClient) {
-        mongoClient = new MongoClient(MONGO_URI);
-        await mongoClient.connect();
-        mongoDb = mongoClient.db("BrandPulse_1");
-    }
-    return mongoDb;
+  if (!mongoClient) {
+    mongoClient = new MongoClient(MONGO_URI);
+    await mongoClient.connect();
+    mongoDb = mongoClient.db("BrandPulse_1");
+  }
+  return mongoDb;
 }
 
 router.get("/results/:requestId", async (req, res) => {
-    try {
-        const rid = parseInt(req.params.requestId);
-        const platform = (req.query.platform || 'reddit').toString().toLowerCase();
-        console.log(`[API] Fetching results for Request ID: ${rid} (platform: ${platform})`);
+  try {
+    const rid = parseInt(req.params.requestId);
+    const platform = (req.query.platform || "reddit").toString().toLowerCase();
+    console.log(
+      `[API] Fetching results for Request ID: ${rid} (platform: ${platform})`,
+    );
 
-        if (platform === 'twitter') {
-            const tweetsResult = await pool.query(`
+    if (platform === "twitter") {
+      const tweetsResult = await pool.query(
+        `
                 SELECT
                     st.tweet_sentiment_label as name,
                     COUNT(*)::INT as value
@@ -37,21 +41,24 @@ router.get("/results/:requestId", async (req, res) => {
                 AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
                 GROUP BY st.tweet_sentiment_label, ds.sentiment_order
                 ORDER BY ds.sentiment_order ASC
-            `, [rid]);
+            `,
+        [rid],
+      );
 
-            const tweetTotal = tweetsResult.rows.reduce((sum, r) => sum + r.value, 0);
-            console.log(`[API] Found ${tweetTotal} tweets for ID ${rid} (Twitter)`);
+      const tweetTotal = tweetsResult.rows.reduce((sum, r) => sum + r.value, 0);
+      console.log(`[API] Found ${tweetTotal} tweets for ID ${rid} (Twitter)`);
 
-            return res.json({
-                posts: tweetsResult.rows,
-                comments: [],
-                totals: { posts: tweetTotal, comments: 0, total: tweetTotal },
-                platform: 'twitter'
-            });
-        }
+      return res.json({
+        posts: tweetsResult.rows,
+        comments: [],
+        totals: { posts: tweetTotal, comments: 0, total: tweetTotal },
+        platform: "twitter",
+      });
+    }
 
-        // Reddit: Query silver tables
-        const postsResult = await pool.query(`
+    // Reddit: Query silver tables
+    const postsResult = await pool.query(
+      `
             SELECT 
                 sp.post_sentiment_label as name, 
                 COUNT(*)::INT as value 
@@ -63,9 +70,12 @@ router.get("/results/:requestId", async (req, res) => {
             AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
             GROUP BY sp.post_sentiment_label, ds.sentiment_order
             ORDER BY ds.sentiment_order ASC
-        `, [rid]);
+        `,
+      [rid],
+    );
 
-        const commentsResult = await pool.query(`
+    const commentsResult = await pool.query(
+      `
             SELECT 
                 sc.comment_sentiment_label as name, 
                 COUNT(*)::INT as value 
@@ -78,37 +88,47 @@ router.get("/results/:requestId", async (req, res) => {
             AND (gk.end_date IS NULL OR DATE(sc.comment_created_at_utc) <= gk.end_date)
             GROUP BY sc.comment_sentiment_label, ds.sentiment_order
             ORDER BY ds.sentiment_order ASC
-        `, [rid]);
+        `,
+      [rid],
+    );
 
-        // Calculate totals
-        const postTotal = postsResult.rows.reduce((sum, r) => sum + r.value, 0);
-        const commentTotal = commentsResult.rows.reduce((sum, r) => sum + r.value, 0);
+    // Calculate totals
+    const postTotal = postsResult.rows.reduce((sum, r) => sum + r.value, 0);
+    const commentTotal = commentsResult.rows.reduce(
+      (sum, r) => sum + r.value,
+      0,
+    );
 
-        console.log(`[API] Found ${postTotal} posts and ${commentTotal} comments for ID ${rid} (Reddit)`);
+    console.log(
+      `[API] Found ${postTotal} posts and ${commentTotal} comments for ID ${rid} (Reddit)`,
+    );
 
-        res.json({
-            posts: postsResult.rows,
-            comments: commentsResult.rows,
-            totals: {
-                posts: postTotal,
-                comments: commentTotal,
-                total: postTotal + commentTotal
-            }
-        });
-    } catch (err) {
-        console.error("Fetch failed:", err.message);
-        res.status(500).json({ error: "Fetch failed" });
-    }
+    res.json({
+      posts: postsResult.rows,
+      comments: commentsResult.rows,
+      totals: {
+        posts: postTotal,
+        comments: commentTotal,
+        total: postTotal + commentTotal,
+      },
+    });
+  } catch (err) {
+    console.error("Fetch failed:", err.message);
+    res.status(500).json({ error: "Fetch failed" });
+  }
 });
 
 router.get("/details/:requestId", async (req, res) => {
-    try {
-        const rid = parseInt(req.params.requestId);
-        const platform = (req.query.platform || 'reddit').toString().toLowerCase();
-        console.log(`[API] Fetching detailed data for Request ID: ${rid} (platform: ${platform})`);
+  try {
+    const rid = parseInt(req.params.requestId);
+    const platform = (req.query.platform || "reddit").toString().toLowerCase();
+    console.log(
+      `[API] Fetching detailed data for Request ID: ${rid} (platform: ${platform})`,
+    );
 
-        if (platform === 'twitter') {
-            const tweetsResult = await pool.query(`
+    if (platform === "twitter") {
+      const tweetsResult = await pool.query(
+        `
                 SELECT
                     st.silver_tweet_id as id,
                     st.tweet_id as tweet_id,
@@ -128,20 +148,25 @@ router.get("/details/:requestId", async (req, res) => {
                 AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
                 ORDER BY st.favorite_count DESC
                 LIMIT 100
-            `, [rid]);
+            `,
+        [rid],
+      );
 
-            console.log(`[API] Found ${tweetsResult.rows.length} tweets details (Twitter)`);
+      console.log(
+        `[API] Found ${tweetsResult.rows.length} tweets details (Twitter)`,
+      );
 
-            return res.json({
-                posts: [],
-                comments: [],
-                tweets: tweetsResult.rows,
-                platform: 'twitter'
-            });
-        }
+      return res.json({
+        posts: [],
+        comments: [],
+        tweets: tweetsResult.rows,
+        platform: "twitter",
+      });
+    }
 
-        // Reddit: Fetch posts and comments
-        const postsResult = await pool.query(`
+    // Reddit: Fetch posts and comments
+    const postsResult = await pool.query(
+      `
             SELECT 
                 sp.silver_post_id as id,
                 sp.title_clean as title,
@@ -159,9 +184,12 @@ router.get("/details/:requestId", async (req, res) => {
             AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
             ORDER BY sp.post_score DESC
             LIMIT 50
-        `, [rid]);
+        `,
+      [rid],
+    );
 
-        const commentsResult = await pool.query(`
+    const commentsResult = await pool.query(
+      `
             SELECT 
                 c.silver_comment_id as id,
                 c.comment_body_clean as body,
@@ -179,64 +207,69 @@ router.get("/details/:requestId", async (req, res) => {
             AND (gk.end_date IS NULL OR DATE(c.comment_created_at_utc) <= gk.end_date)
             ORDER BY c.comment_score DESC
             LIMIT 100
-        `, [rid]);
+        `,
+      [rid],
+    );
 
-        console.log(`[API] Found ${postsResult.rows.length} posts and ${commentsResult.rows.length} comments details (Reddit)`);
+    console.log(
+      `[API] Found ${postsResult.rows.length} posts and ${commentsResult.rows.length} comments details (Reddit)`,
+    );
 
-        res.json({
-            posts: postsResult.rows,
-            comments: commentsResult.rows,
-            platform: 'reddit'
-        });
-    } catch (err) {
-        console.error("Details fetch failed:", err.message);
-        res.status(500).json({ error: "Details fetch failed" });
-    }
+    res.json({
+      posts: postsResult.rows,
+      comments: commentsResult.rows,
+      platform: "reddit",
+    });
+  } catch (err) {
+    console.error("Details fetch failed:", err.message);
+    res.status(500).json({ error: "Details fetch failed" });
+  }
 });
 
 // GET /api/data/ingestion-stats/:requestId
 // Returns ingestion job statistics from MongoDB
 router.get("/ingestion-stats/:requestId", async (req, res) => {
-    try {
-        const rid = parseInt(req.params.requestId);
-        console.log(`[API] Fetching ingestion stats for Request ID: ${rid}`);
+  try {
+    const rid = parseInt(req.params.requestId);
+    console.log(`[API] Fetching ingestion stats for Request ID: ${rid}`);
 
-        const db = await getMongoDb();
-        const jobsCollection = db.collection("bronze_ingestion_jobs");
+    const db = await getMongoDb();
+    const jobsCollection = db.collection("bronze_ingestion_jobs");
 
-        // Find the job by global_keyword_id
-        const job = await jobsCollection.findOne({ global_keyword_id: rid });
+    // Find the job by global_keyword_id
+    const job = await jobsCollection.findOne({ global_keyword_id: rid });
 
-        if (!job) {
-            return res.json({
-                processed: 0,
-                skipped_nsfw: 0,
-                skipped_non_english: 0
-            });
-        }
-
-        res.json({
-            processed: job.stats?.processed || 0,
-            skipped_nsfw: job.stats?.skipped_nsfw || 0,
-            skipped_non_english: job.stats?.skipped_non_english || 0
-        });
-    } catch (err) {
-        console.error("Ingestion stats fetch failed:", err.message);
-        res.status(500).json({ error: "Ingestion stats fetch failed" });
+    if (!job) {
+      return res.json({
+        processed: 0,
+        skipped_nsfw: 0,
+        skipped_non_english: 0,
+      });
     }
+
+    res.json({
+      processed: job.stats?.processed || 0,
+      skipped_nsfw: job.stats?.skipped_nsfw || 0,
+      skipped_non_english: job.stats?.skipped_non_english || 0,
+    });
+  } catch (err) {
+    console.error("Ingestion stats fetch failed:", err.message);
+    res.status(500).json({ error: "Ingestion stats fetch failed" });
+  }
 });
 
 // GET /api/data/history/:userId
 // Returns all past analyses for a user, sorted by most recent
 router.get("/history/:userId", async (req, res) => {
-    try {
-        const userId = parseInt(req.params.userId);
-        const limit = parseInt(req.query.limit) || 50; // Default 50 results
-        const offset = parseInt(req.query.offset) || 0;
+  try {
+    const userId = parseInt(req.params.userId);
+    const limit = parseInt(req.query.limit) || 50; // Default 50 results
+    const offset = parseInt(req.query.offset) || 0;
 
-        console.log(`[API] Fetching analysis history for User ID: ${userId}`);
+    console.log(`[API] Fetching analysis history for User ID: ${userId}`);
 
-        const result = await pool.query(`
+    const result = await pool.query(
+      `
             SELECT 
                 history_id,
                 keyword,
@@ -255,36 +288,41 @@ router.get("/history/:userId", async (req, res) => {
             WHERE user_id = $1
             ORDER BY analysis_timestamp DESC
             LIMIT $2 OFFSET $3
-        `, [userId, limit, offset]);
+        `,
+      [userId, limit, offset],
+    );
 
-        // Also get total count for pagination
-        const countResult = await pool.query(
-            `SELECT COUNT(*) as total FROM analysis_history WHERE user_id = $1`,
-            [userId]
-        );
+    // Also get total count for pagination
+    const countResult = await pool.query(
+      `SELECT COUNT(*) as total FROM analysis_history WHERE user_id = $1`,
+      [userId],
+    );
 
-        res.json({
-            analyses: result.rows,
-            total: parseInt(countResult.rows[0].total),
-            limit,
-            offset
-        });
-    } catch (err) {
-        console.error("History fetch failed:", err.message);
-        res.status(500).json({ error: "Failed to fetch analysis history" });
-    }
+    res.json({
+      analyses: result.rows,
+      total: parseInt(countResult.rows[0].total),
+      limit,
+      offset,
+    });
+  } catch (err) {
+    console.error("History fetch failed:", err.message);
+    res.status(500).json({ error: "Failed to fetch analysis history" });
+  }
 });
 
 // GET /api/data/history/:userId/search?keyword=bitcoin
 // Search user's history by keyword
 router.get("/history/:userId/search", async (req, res) => {
-    try {
-        const userId = parseInt(req.params.userId);
-        const searchKeyword = req.query.keyword || '';
+  try {
+    const userId = parseInt(req.params.userId);
+    const searchKeyword = req.query.keyword || "";
 
-        console.log(`[API] Searching history for User ID: ${userId}, Keyword: ${searchKeyword}`);
+    console.log(
+      `[API] Searching history for User ID: ${userId}, Keyword: ${searchKeyword}`,
+    );
 
-        const result = await pool.query(`
+    const result = await pool.query(
+      `
             SELECT 
                 history_id,
                 keyword,
@@ -302,13 +340,75 @@ router.get("/history/:userId/search", async (req, res) => {
             WHERE user_id = $1 AND keyword ILIKE $2
             ORDER BY analysis_timestamp DESC
             LIMIT 20
-        `, [userId, `%${searchKeyword}%`]);
+        `,
+      [userId, `%${searchKeyword}%`],
+    );
 
-        res.json({ analyses: result.rows });
-    } catch (err) {
-        console.error("History search failed:", err.message);
-        res.status(500).json({ error: "Failed to search analysis history" });
+    res.json({ analyses: result.rows });
+  } catch (err) {
+    console.error("History search failed:", err.message);
+    res.status(500).json({ error: "Failed to search analysis history" });
+  }
+});
+
+router.get("/trend/:requestId", verifyToken, async (req, res) => {
+  try {
+    const rid = parseInt(req.params.requestId);
+    const allowed = ["daily", "weekly", "monthly"];
+    const gran = allowed.includes(req.query.granularity)
+      ? req.query.granularity
+      : "daily";
+    const userId = req.user.user_id;
+
+    const ownershipResult = await pool.query(
+      `SELECT platform_id FROM analysis_history WHERE request_id = $1 AND user_id = $2 LIMIT 1`,
+      [rid, userId],
+    );
+    if (ownershipResult.rows.length === 0) {
+      return res
+        .status(403)
+        .json({ error: "Not authorized or analysis not found" });
     }
+    const { platform_id } = ownershipResult.rows[0];
+
+    const dateExpr =
+      gran === "monthly"
+        ? "DATE_TRUNC('month', dd.calendar_date)::date"
+        : gran === "weekly"
+          ? "DATE_TRUNC('week', dd.calendar_date)::date"
+          : "dd.calendar_date";
+
+    const trendResult = await pool.query(
+      `
+            SELECT
+                ${dateExpr}           AS date,
+                ds.sentiment_label    AS label,
+                COUNT(*)::int         AS count
+            FROM fact_sentiment_events fse
+            JOIN dim_date      dd ON fse.date_id      = dd.date_id
+            JOIN dim_sentiment ds ON fse.sentiment_id = ds.sentiment_id
+            WHERE fse.request_id  = $1
+              AND fse.platform_id = $2
+            GROUP BY ${dateExpr}, ds.sentiment_label, ds.sentiment_order
+            ORDER BY date ASC, ds.sentiment_order ASC
+        `,
+      [rid, platform_id],
+    );
+
+    const map = {};
+    for (const row of trendResult.rows) {
+      const dateStr = row.date.toISOString().slice(0, 10);
+      if (!map[dateStr]) {
+        map[dateStr] = { date: dateStr, Positive: 0, Neutral: 0, Negative: 0 };
+      }
+      map[dateStr][row.label] = row.count;
+    }
+
+    res.json(Object.values(map));
+  } catch (err) {
+    console.error("Trend fetch failed:", err);
+    res.status(500).json({ error: "Trend fetch failed" });
+  }
 });
 
 export default router;
