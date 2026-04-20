@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { MongoClient } from "mongodb";
 import pool from "../db.js";
+import { verifyToken } from "../middleware/VerifyToken.js";
 
 const router = Router();
 
@@ -308,6 +309,58 @@ router.get("/history/:userId/search", async (req, res) => {
     } catch (err) {
         console.error("History search failed:", err.message);
         res.status(500).json({ error: "Failed to search analysis history" });
+    }
+});
+
+router.get("/trend/:requestId", verifyToken, async (req, res) => {
+    try {
+        const rid = parseInt(req.params.requestId);
+        const allowed = ['daily', 'weekly', 'monthly'];
+        const gran = allowed.includes(req.query.granularity) ? req.query.granularity : 'daily';
+        const userId = req.user.user_id;
+
+        const ownershipResult = await pool.query(
+            `SELECT platform_id FROM analysis_history WHERE request_id = $1 AND user_id = $2 LIMIT 1`,
+            [rid, userId]
+        );
+        if (ownershipResult.rows.length === 0) {
+            return res.status(403).json({ error: "Not authorized or analysis not found" });
+        }
+        const { platform_id } = ownershipResult.rows[0];
+
+        const dateExpr = gran === 'monthly'
+            ? "DATE_TRUNC('month', dd.calendar_date)::date"
+            : gran === 'weekly'
+                ? "DATE_TRUNC('week', dd.calendar_date)::date"
+                : "dd.calendar_date";
+
+        const trendResult = await pool.query(`
+            SELECT
+                ${dateExpr}           AS date,
+                ds.sentiment_label    AS label,
+                COUNT(*)::int         AS count
+            FROM fact_sentiment_events fse
+            JOIN dim_date      dd ON fse.date_id      = dd.date_id
+            JOIN dim_sentiment ds ON fse.sentiment_id = ds.sentiment_id
+            WHERE fse.request_id  = $1
+              AND fse.platform_id = $2
+            GROUP BY ${dateExpr}, ds.sentiment_label, ds.sentiment_order
+            ORDER BY date ASC, ds.sentiment_order ASC
+        `, [rid, platform_id]);
+
+        const map = {};
+        for (const row of trendResult.rows) {
+            const dateStr = row.date.toISOString().slice(0, 10);
+            if (!map[dateStr]) {
+                map[dateStr] = { date: dateStr, Positive: 0, Neutral: 0, Negative: 0 };
+            }
+            map[dateStr][row.label] = row.count;
+        }
+
+        res.json(Object.values(map));
+    } catch (err) {
+        console.error("Trend fetch failed:", err);
+        res.status(500).json({ error: "Trend fetch failed" });
     }
 });
 
