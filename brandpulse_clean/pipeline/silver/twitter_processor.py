@@ -16,6 +16,7 @@ Key differences from Reddit:
 """
 
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from utils.logging import get_logger
 
 logger = get_logger("SILVER-TWITTER")
@@ -106,13 +107,25 @@ def run_silver_twitter(request_id, batch_size=50):
 
             tweet_id = tweet.get("tweet_id") or raw_doc.get("meta", {}).get("external_id")
 
+            # Parse created_at. Twitter RapidAPI format: "Mon Apr 13 23:24:39 +0000 2026"
+            # (RFC 2822-ish with trailing year). Try strptime first, then RFC 2822 parser,
+            # then ISO 8601 as a final fallback. NEVER silently fall back to now() — that
+            # breaks date-range filters in Gold and /results endpoint.
             created_at = None
             raw_ts = tweet.get("created_at")
             if raw_ts:
-                try:
-                    created_at = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
-                except ValueError:
-                    created_at = datetime.now(timezone.utc)
+                for parser in (
+                    lambda s: datetime.strptime(s, "%a %b %d %H:%M:%S %z %Y"),
+                    lambda s: parsedate_to_datetime(s),
+                    lambda s: datetime.fromisoformat(s.replace("Z", "+00:00")),
+                ):
+                    try:
+                        created_at = parser(raw_ts)
+                        break
+                    except (ValueError, TypeError):
+                        continue
+                if created_at is None:
+                    logger.warning("Could not parse tweet created_at: %r", raw_ts)
 
             cursor_pg.execute(
                 """

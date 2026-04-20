@@ -43,11 +43,12 @@ ON CONFLICT ON CONSTRAINT fact_sentiment_events_unique_content DO NOTHING;
 
 
 def run_twitter_gold(keyword, request_id):
+    rid = int(request_id)
     conn = get_pg_connection()
     conn.autocommit = False
     try:
         with conn.cursor() as cur:
-            cur.execute(INSERT_TWEET_SENTIMENT_SQL, (request_id, request_id))
+            cur.execute(INSERT_TWEET_SENTIMENT_SQL, (rid, rid))
             tweets_inserted = cur.rowcount
             print(f"[GOLD] Inserted {tweets_inserted} tweet sentiment rows.")
 
@@ -55,7 +56,7 @@ def run_twitter_gold(keyword, request_id):
                 UPDATE silver_twitter_tweets
                 SET gold_processed = TRUE
                 WHERE global_keyword_id = %s AND gold_processed = FALSE
-            """, (request_id,))
+            """, (rid,))
             print(f"[GOLD] Marked {cur.rowcount} silver tweets as gold_processed.")
 
         conn.commit()
