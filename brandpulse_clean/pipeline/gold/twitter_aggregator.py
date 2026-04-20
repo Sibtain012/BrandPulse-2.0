@@ -55,8 +55,13 @@ def run_twitter_gold(keyword, request_id):
             cur.execute("""
                 UPDATE silver_twitter_tweets
                 SET gold_processed = TRUE
-                WHERE global_keyword_id = %s AND gold_processed = FALSE
-            """, (rid,))
+                WHERE global_keyword_id = %s
+                AND gold_processed = FALSE
+                AND silver_tweet_id IN (
+                    SELECT silver_content_id FROM fact_sentiment_events
+                    WHERE request_id = %s AND platform_id = 2
+                )
+            """, (rid, rid))
             print(f"[GOLD] Marked {cur.rowcount} silver tweets as gold_processed.")
 
         conn.commit()
