@@ -136,10 +136,7 @@ router.get("/intent/results/:requestId", async (req, res) => {
             st.intent_label AS name,
             COUNT(*)::INT   AS value
         FROM silver_twitter_tweets_intent st
-        JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
         WHERE st.global_keyword_id = $1
-        AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
-        AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
         GROUP BY st.intent_label
         ORDER BY st.intent_label ASC
         `,
@@ -163,10 +160,7 @@ router.get("/intent/results/:requestId", async (req, res) => {
           sp.intent_label AS name,
           COUNT(*)::INT   AS value
       FROM silver_reddit_posts_intent sp
-      JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
       WHERE sp.global_keyword_id = $1
-      AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
-      AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
       GROUP BY sp.intent_label
       ORDER BY sp.intent_label ASC
       `,
@@ -322,10 +316,7 @@ router.get("/intent/details/:requestId", async (req, res) => {
             st.intent_score AS confidence,
             st.tweet_created_at AS created_at
         FROM silver_twitter_tweets_intent st
-        JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
         WHERE st.global_keyword_id = $1
-        AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
-        AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
         ORDER BY st.favorite_count DESC
         LIMIT 100
         `,
@@ -355,10 +346,7 @@ router.get("/intent/details/:requestId", async (req, res) => {
           sp.post_url AS url,
           sp.created_at_utc AS created_at
       FROM silver_reddit_posts_intent sp
-      JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
       WHERE sp.global_keyword_id = $1
-      AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
-      AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
       ORDER BY sp.post_score DESC
       LIMIT 50
       `,

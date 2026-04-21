@@ -75,7 +75,7 @@ const History = () => {
         if (analysis.analysis_mode === 'intent') {
             navigate(`/intent-analysis?requestId=${analysis.request_id}&platform=${platform}`);
         } else {
-            navigate(`/sentiment-analysis?requestId=${analysis.request_id}`);
+            navigate(`/sentiment-analysis?requestId=${analysis.request_id}&platform=${platform}`);
         }
     };
 

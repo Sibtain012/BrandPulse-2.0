@@ -395,7 +395,9 @@ router.post("/analyze", async (req, res) => {
     return res.status(400).json({ error: `Unsupported platform: ${platform}` });
   }
   if (!VALID_MODES.includes(mode)) {
-    return res.status(400).json({ error: `Unsupported analysis mode: ${mode}` });
+    return res
+      .status(400)
+      .json({ error: `Unsupported analysis mode: ${mode}` });
   }
   const platformId = PLATFORM_IDS[platform];
 
@@ -435,19 +437,48 @@ router.post("/analyze", async (req, res) => {
       console.log(`[Cache] ${cacheResult.reason}`);
 
       if (cacheResult.coverage >= 75) {
-        // CACHE HIT: Return existing analysis
+        // CACHE HIT: Ensure analysis_history row exists (backfill if missing),
+        // then return existing analysis.
+        const cachedRequestId = cacheResult.bestMatch.requestId;
+        const cachedStart = cacheResult.bestMatch.startDate;
+        const cachedEnd = cacheResult.bestMatch.endDate;
+        try {
+          if (platform === "twitter") {
+            await saveTwitterAnalysisToHistory(
+              cachedRequestId,
+              keyword,
+              user_id,
+              cachedStart,
+              cachedEnd,
+            );
+          } else {
+            await saveAnalysisToHistory(
+              cachedRequestId,
+              keyword,
+              user_id,
+              cachedStart,
+              cachedEnd,
+            );
+          }
+        } catch (historyErr) {
+          console.error(
+            `⚠️ Failed to backfill history on cache hit (ID: ${cachedRequestId}):`,
+            historyErr.message,
+          );
+        }
+
         return res.status(200).json({
           message: `Using cached analysis (${cacheResult.coverage.toFixed(1)}% date range coverage)`,
           status: "COMPLETED",
-          requestId: cacheResult.bestMatch.requestId,
+          requestId: cachedRequestId,
           trigger: false,
           cached: true,
           analysisMode: mode,
           cacheInfo: {
             coverage: cacheResult.coverage,
             cachedDateRange: {
-              start: cacheResult.bestMatch.startDate,
-              end: cacheResult.bestMatch.endDate,
+              start: cachedStart,
+              end: cachedEnd,
             },
             lastAnalyzed: cacheResult.bestMatch.lastRunAt,
           },
@@ -508,7 +539,7 @@ router.post("/analyze", async (req, res) => {
       keyword,
       requestId.toString(), // Request ID
       platform, // Platform (reddit | twitter)
-      mode,     // Analysis mode (sentiment | intent)
+      mode, // Analysis mode (sentiment | intent)
     ]);
     pythonProcess.stdout.on("data", (data) =>
       console.log(`Python Output: ${data}`),
@@ -518,7 +549,9 @@ router.post("/analyze", async (req, res) => {
     );
 
     pythonProcess.on("close", async (code) => {
-      console.log(`Pipeline (ID: ${requestId}) exited with code ${code}`);
+      console.log(
+        `[Route] Pipeline (ID: ${requestId}, platform: ${platform}, mode: ${mode}) exited with code ${code}`,
+      );
       if (code !== 0) {
         await pool.query(
           "UPDATE global_keywords SET status = 'FAILED' WHERE global_keyword_id = $1",

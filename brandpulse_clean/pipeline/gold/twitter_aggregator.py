@@ -70,8 +70,6 @@ LEFT JOIN dim_time dt ON dt.time_id = (
 WHERE st.global_keyword_id = %s
   AND st.intent_label IS NOT NULL
   AND st.gold_processed = FALSE
-  AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
-  AND (gk.end_date   IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
 ON CONFLICT ON CONSTRAINT fact_intent_events_unique_content DO NOTHING;
 """
 

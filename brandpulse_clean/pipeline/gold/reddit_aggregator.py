@@ -111,8 +111,6 @@ LEFT JOIN dim_time dt ON dt.time_id = (EXTRACT(HOUR FROM sp.created_at_utc) * 10
 WHERE sp.global_keyword_id = %s
   AND sp.intent_label IS NOT NULL
   AND sp.gold_processed = FALSE
-  AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
-  AND (gk.end_date   IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
 ON CONFLICT ON CONSTRAINT fact_intent_events_unique_content DO NOTHING;
 """
 
