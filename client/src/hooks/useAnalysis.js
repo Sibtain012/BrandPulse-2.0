@@ -10,14 +10,20 @@ export const useAnalysis = () => {
         return stored ? parseInt(stored) : null;
     });
 
+    const [activeMode, setActiveMode] = useState(() => {
+        return localStorage.getItem('activeAnalysisMode') || 'sentiment';
+    });
+
     const startAnalysis = async (
         keyword,
         userId,
         startDate = null,
         endDate = null,
-        platform = 'reddit'
+        platform = 'reddit',
+        analysisMode = 'sentiment'
     ) => {
         setStatus('PROCESSING');
+        setActiveMode(analysisMode);
         try {
             const response = await fetch('/api/pipeline/analyze', {
                 method: 'POST',
@@ -27,7 +33,8 @@ export const useAnalysis = () => {
                     user_id: userId,
                     start_date: startDate,
                     end_date: endDate,
-                    platform
+                    platform,
+                    analysis_mode: analysisMode
                 })
             });
 
@@ -38,12 +45,13 @@ export const useAnalysis = () => {
             if (data.requestId) {
                 setActiveRequestId(data.requestId);
                 localStorage.setItem('activeRequestId', data.requestId.toString());
+                localStorage.setItem('activeAnalysisMode', analysisMode);
             }
-
 
             if (data.cached) {
                 setStatus('COMPLETED');
                 localStorage.removeItem('activeRequestId');
+                localStorage.removeItem('activeAnalysisMode');
                 setActiveRequestId(null);
                 return data;
             }
@@ -52,6 +60,7 @@ export const useAnalysis = () => {
         } catch (err) {
             setStatus('FAILED');
             localStorage.removeItem('activeRequestId');
+            localStorage.removeItem('activeAnalysisMode');
         }
     };
 
@@ -76,6 +85,7 @@ export const useAnalysis = () => {
                     if (data.status === 'COMPLETED' || data.status === 'FAILED') {
                         setStatus(data.status);
                         localStorage.removeItem('activeRequestId');
+                        localStorage.removeItem('activeAnalysisMode');
                         clearInterval(interval);
                     }
                 } catch (e) {
@@ -84,6 +94,7 @@ export const useAnalysis = () => {
                     if (failCount >= MAX_FAILS) {
                         setStatus('FAILED');
                         localStorage.removeItem('activeRequestId');
+                        localStorage.removeItem('activeAnalysisMode');
                         clearInterval(interval);
                     }
                 }
@@ -92,5 +103,5 @@ export const useAnalysis = () => {
         return () => { if (interval) clearInterval(interval); };
     }, [status, activeRequestId]);
 
-    return { status, startAnalysis, activeRequestId };
+    return { status, startAnalysis, activeRequestId, activeMode };
 };

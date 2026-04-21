@@ -25,9 +25,10 @@ from database.mongo import _get_client
 from database.postgres import get_pg_connection
 from utils.text_processing.twitter import clean_twitter_text, is_eligible_tweet
 from pipeline.silver.sentiment import run_sentiment_batch
+from models.enums import AnalysisMode
 
 
-def run_silver_twitter(request_id, batch_size=50):
+def run_silver_twitter(request_id, batch_size=50, mode="sentiment"):
     pg_conn = get_pg_connection()
     cursor_pg = pg_conn.cursor()
     processed_mongo_ids = []
@@ -89,7 +90,11 @@ def run_silver_twitter(request_id, batch_size=50):
         return
 
     try:
-        all_scores = run_sentiment_batch(texts_to_score)
+        if mode == AnalysisMode.INTENT.value:
+            from pipeline.silver.intent import run_intent_batch
+            all_scores = run_intent_batch(texts_to_score)
+        else:
+            all_scores = run_sentiment_batch(texts_to_score)
     except Exception as e:
         logger.error("Inference crash: %s", e)
         cursor_pg.close()
@@ -127,30 +132,57 @@ def run_silver_twitter(request_id, batch_size=50):
                 if created_at is None:
                     logger.warning("Could not parse tweet created_at: %r", raw_ts)
 
-            cursor_pg.execute(
-                """
-                INSERT INTO silver_twitter_tweets (
-                    original_bronze_id, keyword, global_keyword_id,
-                    tweet_id, text_clean, tweet_created_at,
-                    favorite_count, retweet_count, reply_count, quote_count,
-                    tweet_sentiment_label, tweet_sentiment_score, processed_at
+            if mode == AnalysisMode.INTENT.value:
+                # ========== INTENT BRANCH: write to silver_twitter_tweets_intent ==========
+                cursor_pg.execute(
+                    """
+                    INSERT INTO silver_twitter_tweets_intent (
+                        original_bronze_id, keyword, global_keyword_id,
+                        tweet_id, text_clean, tweet_created_at,
+                        favorite_count, retweet_count, reply_count, quote_count,
+                        intent_label, intent_score, processed_at
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (tweet_id, global_keyword_id) DO NOTHING
+                    RETURNING silver_tweet_id
+                    """,
+                    (
+                        str(raw_doc["_id"]), item["keyword"], rid,
+                        str(tweet_id), item["cleaned_text"], created_at,
+                        tweet.get("favorite_count", 0),
+                        tweet.get("retweet_count", 0),
+                        tweet.get("reply_count", 0),
+                        tweet.get("quote_count", 0),
+                        sentiment["label"], sentiment["score"],
+                        datetime.now(timezone.utc)
+                    )
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (original_bronze_id) DO UPDATE
-                SET original_bronze_id = EXCLUDED.original_bronze_id
-                RETURNING silver_tweet_id
-                """,
-                (
-                    str(raw_doc["_id"]), item["keyword"], rid,
-                    str(tweet_id), item["cleaned_text"], created_at,
-                    tweet.get("favorite_count", 0),
-                    tweet.get("retweet_count", 0),
-                    tweet.get("reply_count", 0),
-                    tweet.get("quote_count", 0),
-                    sentiment["label"], sentiment["score"],
-                    datetime.now(timezone.utc)
+            else:
+                # ========== SENTIMENT BRANCH: original code, unchanged ==========
+                cursor_pg.execute(
+                    """
+                    INSERT INTO silver_twitter_tweets (
+                        original_bronze_id, keyword, global_keyword_id,
+                        tweet_id, text_clean, tweet_created_at,
+                        favorite_count, retweet_count, reply_count, quote_count,
+                        tweet_sentiment_label, tweet_sentiment_score, processed_at
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (original_bronze_id) DO UPDATE
+                    SET original_bronze_id = EXCLUDED.original_bronze_id
+                    RETURNING silver_tweet_id
+                    """,
+                    (
+                        str(raw_doc["_id"]), item["keyword"], rid,
+                        str(tweet_id), item["cleaned_text"], created_at,
+                        tweet.get("favorite_count", 0),
+                        tweet.get("retweet_count", 0),
+                        tweet.get("reply_count", 0),
+                        tweet.get("quote_count", 0),
+                        sentiment["label"], sentiment["score"],
+                        datetime.now(timezone.utc)
+                    )
                 )
-            )
 
             res = cursor_pg.fetchone()
             if res:

@@ -17,7 +17,7 @@ from pipeline.gold.reddit_aggregator import run_reddit_gold
 from pipeline.gold.twitter_aggregator import run_twitter_gold
 
 
-def run_gold_etl(keyword, request_id, platform='reddit'):
+def run_gold_etl(keyword, request_id, platform='reddit', mode='sentiment'):
     """
     Route the gold ETL process to the appropriate platform aggregator.
     
@@ -29,6 +29,8 @@ def run_gold_etl(keyword, request_id, platform='reddit'):
         The global_keyword_id from the database.
     platform : str
         The platform to process (default: 'reddit').
+    mode : str
+        'sentiment' (default) or 'intent'. Passed through to aggregator.
     
     Raises
     ------
@@ -36,8 +38,8 @@ def run_gold_etl(keyword, request_id, platform='reddit'):
         If an unsupported platform is passed.
     """
     if platform == 'reddit':
-        run_reddit_gold(keyword, request_id)
+        run_reddit_gold(keyword, request_id, mode=mode)
     elif platform == 'twitter':
-        run_twitter_gold(keyword, request_id)
+        run_twitter_gold(keyword, request_id, mode=mode)
     else:
         raise ValueError(f"Unsupported platform: {platform}")

@@ -118,6 +118,75 @@ router.get("/results/:requestId", async (req, res) => {
   }
 });
 
+// ============================================================
+// INTENT RESULTS — reads from silver intent tables
+// ============================================================
+router.get("/intent/results/:requestId", async (req, res) => {
+  try {
+    const rid = parseInt(req.params.requestId);
+    const platform = (req.query.platform || "reddit").toString().toLowerCase();
+    console.log(
+      `[API] Fetching intent results for Request ID: ${rid} (platform: ${platform})`,
+    );
+
+    if (platform === "twitter") {
+      const tweetsResult = await pool.query(
+        `
+        SELECT
+            st.intent_label AS name,
+            COUNT(*)::INT   AS value
+        FROM silver_twitter_tweets_intent st
+        JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
+        WHERE st.global_keyword_id = $1
+        AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
+        AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
+        GROUP BY st.intent_label
+        ORDER BY st.intent_label ASC
+        `,
+        [rid],
+      );
+
+      const tweetTotal = tweetsResult.rows.reduce((sum, r) => sum + r.value, 0);
+      return res.json({
+        posts: tweetsResult.rows,
+        comments: [],
+        totals: { posts: tweetTotal, comments: 0, total: tweetTotal },
+        platform: "twitter",
+        analysisMode: "intent",
+      });
+    }
+
+    // Reddit intent
+    const postsResult = await pool.query(
+      `
+      SELECT
+          sp.intent_label AS name,
+          COUNT(*)::INT   AS value
+      FROM silver_reddit_posts_intent sp
+      JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+      WHERE sp.global_keyword_id = $1
+      AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
+      AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
+      GROUP BY sp.intent_label
+      ORDER BY sp.intent_label ASC
+      `,
+      [rid],
+    );
+
+    const postTotal = postsResult.rows.reduce((sum, r) => sum + r.value, 0);
+
+    res.json({
+      posts: postsResult.rows,
+      comments: [],
+      totals: { posts: postTotal, comments: 0, total: postTotal },
+      analysisMode: "intent",
+    });
+  } catch (err) {
+    console.error("Intent results fetch failed:", err.message);
+    res.status(500).json({ error: "Intent results fetch failed" });
+  }
+});
+
 router.get("/details/:requestId", async (req, res) => {
   try {
     const rid = parseInt(req.params.requestId);
@@ -226,6 +295,88 @@ router.get("/details/:requestId", async (req, res) => {
   }
 });
 
+// ============================================================
+// INTENT DETAILS — reads individual items from silver intent tables
+// ============================================================
+router.get("/intent/details/:requestId", async (req, res) => {
+  try {
+    const rid = parseInt(req.params.requestId);
+    const platform = (req.query.platform || "reddit").toString().toLowerCase();
+    console.log(
+      `[API] Fetching intent details for Request ID: ${rid} (platform: ${platform})`,
+    );
+
+    if (platform === "twitter") {
+      const tweetsResult = await pool.query(
+        `
+        SELECT
+            st.silver_tweet_id AS id,
+            st.tweet_id AS tweet_id,
+            st.text_clean AS body,
+            st.tweet_url AS url,
+            st.favorite_count AS score,
+            st.retweet_count,
+            st.reply_count,
+            st.quote_count,
+            st.intent_label AS intent,
+            st.intent_score AS confidence,
+            st.tweet_created_at AS created_at
+        FROM silver_twitter_tweets_intent st
+        JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
+        WHERE st.global_keyword_id = $1
+        AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
+        AND (gk.end_date IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
+        ORDER BY st.favorite_count DESC
+        LIMIT 100
+        `,
+        [rid],
+      );
+
+      return res.json({
+        posts: [],
+        comments: [],
+        tweets: tweetsResult.rows,
+        platform: "twitter",
+        analysisMode: "intent",
+      });
+    }
+
+    // Reddit intent details
+    const postsResult = await pool.query(
+      `
+      SELECT
+          sp.silver_post_id AS id,
+          sp.title_clean AS title,
+          sp.body_clean AS body,
+          sp.subreddit_name AS subreddit,
+          sp.post_score AS score,
+          sp.intent_label AS intent,
+          sp.intent_score AS confidence,
+          sp.post_url AS url,
+          sp.created_at_utc AS created_at
+      FROM silver_reddit_posts_intent sp
+      JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+      WHERE sp.global_keyword_id = $1
+      AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
+      AND (gk.end_date IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
+      ORDER BY sp.post_score DESC
+      LIMIT 50
+      `,
+      [rid],
+    );
+
+    res.json({
+      posts: postsResult.rows,
+      comments: [],
+      platform: "reddit",
+      analysisMode: "intent",
+    });
+  } catch (err) {
+    console.error("Intent details fetch failed:", err.message);
+    res.status(500).json({ error: "Intent details fetch failed" });
+  }
+});
+
 // GET /api/data/ingestion-stats/:requestId
 // Returns ingestion job statistics from MongoDB
 router.get("/ingestion-stats/:requestId", async (req, res) => {
@@ -270,9 +421,10 @@ router.get("/history/:userId", async (req, res) => {
 
     const result = await pool.query(
       `
-            SELECT 
+            SELECT
                 history_id,
                 keyword,
+                platform_id,
                 start_date,
                 end_date,
                 total_posts,
@@ -283,7 +435,10 @@ router.get("/history/:userId", async (req, res) => {
                 avg_sentiment_score,
                 request_id,
                 analysis_timestamp,
-                created_at
+                created_at,
+                COALESCE(analysis_mode, 'sentiment') AS analysis_mode,
+                dominant_intent,
+                intent_distribution
             FROM analysis_history
             WHERE user_id = $1
             ORDER BY analysis_timestamp DESC
@@ -323,9 +478,10 @@ router.get("/history/:userId/search", async (req, res) => {
 
     const result = await pool.query(
       `
-            SELECT 
+            SELECT
                 history_id,
                 keyword,
+                platform_id,
                 start_date,
                 end_date,
                 total_posts,
@@ -335,7 +491,10 @@ router.get("/history/:userId/search", async (req, res) => {
                 avg_comment_sentiment_score,
                 avg_sentiment_score,
                 request_id,
-                analysis_timestamp
+                analysis_timestamp,
+                COALESCE(analysis_mode, 'sentiment') AS analysis_mode,
+                dominant_intent,
+                intent_distribution
             FROM analysis_history
             WHERE user_id = $1 AND keyword ILIKE $2
             ORDER BY analysis_timestamp DESC

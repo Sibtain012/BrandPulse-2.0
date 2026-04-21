@@ -34,6 +34,7 @@ from database.postgres import get_pg_connection
 from utils.text_processing.base import hash_author, aggregate_sentiment
 from utils.text_processing.reddit import clean_reddit_text, is_eligible_comment
 from pipeline.silver.sentiment import run_sentiment_batch
+from models.enums import AnalysisMode
 
 
 def detect_comment_format(comment: dict) -> dict:
@@ -47,10 +48,16 @@ def detect_comment_format(comment: dict) -> dict:
     return comment
 
 
-def run_silver(request_id, batch_size=50):
+def run_silver(request_id, batch_size=50, mode="sentiment"):
     """
-    Main Silver Layer process: Cleans data, runs RoBERTa sentiment,
+    Main Silver Layer process: Cleans data, runs classification model,
     and persists to PostgreSQL with Transactional Integrity.
+
+    Parameters
+    ----------
+    mode : str
+        'sentiment' (default) or 'intent'. Controls which model runs
+        and which silver table receives the output.
     """
     pg_conn = get_pg_connection()
     cursor_pg = pg_conn.cursor()
@@ -118,7 +125,11 @@ def run_silver(request_id, batch_size=50):
                 continue
 
             all_texts_to_score.append(post_text)
-            all_texts_to_score.extend([clean_reddit_text(c.get("body", "")) for c in eligible_comments])
+            # Intent mode: only classify posts, not comments (TD-NEW-01)
+            # Adding comment texts here would cause a score index mismatch
+            # because the intent persistence branch only consumes 1 score per doc.
+            if mode != AnalysisMode.INTENT.value:
+                all_texts_to_score.extend([clean_reddit_text(c.get("body", "")) for c in eligible_comments])
 
             doc_mapping.append({
                 "raw_doc": raw_doc,
@@ -137,9 +148,13 @@ def run_silver(request_id, batch_size=50):
         pg_conn.close()
         return
 
-    # 4. INFERENCE PHASE: BATCH SENTIMENT
+    # 4. INFERENCE PHASE: BATCH CLASSIFICATION (mode-aware)
     try:
-        all_scores = run_sentiment_batch(all_texts_to_score)
+        if mode == AnalysisMode.INTENT.value:
+            from pipeline.silver.intent import run_intent_batch
+            all_scores = run_intent_batch(all_texts_to_score)
+        else:
+            all_scores = run_sentiment_batch(all_texts_to_score)
     except Exception as e:
         print(f"[SILVER] Inference Crash: {e}")
         cursor_pg.close()
@@ -161,91 +176,122 @@ def run_silver(request_id, batch_size=50):
             if current_score_idx >= len(all_scores):
                 break
 
-            post_sentiment = all_scores[current_score_idx]
+            post_classification = all_scores[current_score_idx]
             current_score_idx += 1
 
-            comment_sentiments = all_scores[current_score_idx: current_score_idx + item["comment_count"]]
-            current_score_idx += item["comment_count"]
-
-            agg_label, agg_score = aggregate_sentiment(comment_sentiments)
-
-            # Insert Post (Strict 17 Parameter Tuple)
-            cursor_pg.execute(
-                """
-                INSERT INTO silver_reddit_posts (
-                    original_bronze_id, platform, keyword, global_keyword_id,
-                    post_id, title_clean, body_clean, author_hash,
-                    subreddit_name, post_url, post_score, upvote_ratio, 
-                    total_comments, post_sentiment_label, post_sentiment_score,
-                    created_at_utc, processed_at_utc
-                )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON CONFLICT (original_bronze_id) DO NOTHING
-                RETURNING silver_post_id
-                """,
-                (
-                    str(raw_doc["_id"]), "reddit", item["keyword"], rid,
-                    post_id_val,
-                    item["title_clean"], item["body_clean"], hash_author(post.get("author")),
-                    post.get("subreddit_name_prefixed"), post.get("url"), post.get("score", 0),
-                    post.get("upvote_ratio", 0), post.get("num_comments", 0),
-                    post_sentiment["label"], post_sentiment["score"],
-                    datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc),
-                    datetime.now(timezone.utc)
-                )
-            )
-
-            res = cursor_pg.fetchone()
-            if not res: continue
-            silver_post_id = res[0]
-
-            # ========== NEW: INSERT COMMENTS ==========
-            for i, comment in enumerate(item["eligible_comments"]):
-                if i >= len(comment_sentiments):
-                    break
-
-                comment_sentiment = comment_sentiments[i]
-                comment_id = comment.get("id") or f"{post_id_val}_comment_{i}"
-
+            # Intent mode: skip comments entirely (TD-NEW-01)
+            if mode == AnalysisMode.INTENT.value:
+                # ========== INTENT BRANCH: write to silver_reddit_posts_intent ==========
                 cursor_pg.execute(
                     """
-                    INSERT INTO silver_reddit_comments (
-                        silver_post_id, comment_id, comment_body_clean, author_hash,
-                        comment_score, comment_created_at_utc,
-                        comment_sentiment_label, comment_sentiment_score
+                    INSERT INTO silver_reddit_posts_intent (
+                        original_bronze_id, platform, keyword, global_keyword_id,
+                        post_id, title_clean, body_clean, author_hash,
+                        subreddit_name, post_url, post_score, upvote_ratio,
+                        total_comments, intent_label, intent_score,
+                        created_at_utc, processed_at_utc, model_id
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT DO NOTHING
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (original_bronze_id, global_keyword_id) DO NOTHING
                     """,
                     (
-                        silver_post_id,
-                        comment_id,
-                        clean_reddit_text(comment.get("body", "")),
-                        hash_author(comment.get("author")),
-                        comment.get("score", 0),
-                        datetime.fromtimestamp(comment.get("created_utc", 0), tz=timezone.utc),
-                        comment_sentiment["label"],
-                        comment_sentiment["score"]
+                        str(raw_doc["_id"]), "reddit", item["keyword"], rid,
+                        post_id_val,
+                        item["title_clean"], item["body_clean"], hash_author(post.get("author")),
+                        post.get("subreddit_name_prefixed"), post.get("url"), post.get("score", 0),
+                        post.get("upvote_ratio", 0), post.get("num_comments", 0),
+                        post_classification["label"], post_classification["score"],
+                        datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc),
+                        datetime.now(timezone.utc),
+                        2  # model_id = 2 (intent classifier)
                     )
                 )
-                total_comments_inserted += 1
+                # No comments in intent mode — documented as TD-NEW-01
+                processed_mongo_ids.append(raw_doc["_id"])
+            else:
+                # ========== SENTIMENT BRANCH: original code, unchanged ==========
+                comment_sentiments = all_scores[current_score_idx: current_score_idx + item["comment_count"]]
+                current_score_idx += item["comment_count"]
 
-            # ========== NEW: INSERT COMMENT SENTIMENT SUMMARY ==========
-            cursor_pg.execute(
-                """
-                INSERT INTO silver_reddit_comment_sentiment_summary (
-                    silver_post_id, aggregated_label, aggregated_score
+                agg_label, agg_score = aggregate_sentiment(comment_sentiments)
+
+                # Insert Post (Strict 17 Parameter Tuple)
+                cursor_pg.execute(
+                    """
+                    INSERT INTO silver_reddit_posts (
+                        original_bronze_id, platform, keyword, global_keyword_id,
+                        post_id, title_clean, body_clean, author_hash,
+                        subreddit_name, post_url, post_score, upvote_ratio, 
+                        total_comments, post_sentiment_label, post_sentiment_score,
+                        created_at_utc, processed_at_utc
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (original_bronze_id) DO NOTHING
+                    RETURNING silver_post_id
+                    """,
+                    (
+                        str(raw_doc["_id"]), "reddit", item["keyword"], rid,
+                        post_id_val,
+                        item["title_clean"], item["body_clean"], hash_author(post.get("author")),
+                        post.get("subreddit_name_prefixed"), post.get("url"), post.get("score", 0),
+                        post.get("upvote_ratio", 0), post.get("num_comments", 0),
+                        post_classification["label"], post_classification["score"],
+                        datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc),
+                        datetime.now(timezone.utc)
+                    )
                 )
-                VALUES (%s, %s, %s)
-                ON CONFLICT (silver_post_id) DO UPDATE SET
-                    aggregated_label = EXCLUDED.aggregated_label,
-                    aggregated_score = EXCLUDED.aggregated_score
-                """,
-                (silver_post_id, agg_label, agg_score)
-            )
 
-            # Success: Track ID for MongoDB update later
-            processed_mongo_ids.append(raw_doc["_id"])
+                res = cursor_pg.fetchone()
+                if not res: continue
+                silver_post_id = res[0]
+
+                # ========== INSERT COMMENTS ==========
+                for i, comment in enumerate(item["eligible_comments"]):
+                    if i >= len(comment_sentiments):
+                        break
+
+                    comment_sentiment = comment_sentiments[i]
+                    comment_id = comment.get("id") or f"{post_id_val}_comment_{i}"
+
+                    cursor_pg.execute(
+                        """
+                        INSERT INTO silver_reddit_comments (
+                            silver_post_id, comment_id, comment_body_clean, author_hash,
+                            comment_score, comment_created_at_utc,
+                            comment_sentiment_label, comment_sentiment_score
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        (
+                            silver_post_id,
+                            comment_id,
+                            clean_reddit_text(comment.get("body", "")),
+                            hash_author(comment.get("author")),
+                            comment.get("score", 0),
+                            datetime.fromtimestamp(comment.get("created_utc", 0), tz=timezone.utc),
+                            comment_sentiment["label"],
+                            comment_sentiment["score"]
+                        )
+                    )
+                    total_comments_inserted += 1
+
+                # ========== INSERT COMMENT SENTIMENT SUMMARY ==========
+                cursor_pg.execute(
+                    """
+                    INSERT INTO silver_reddit_comment_sentiment_summary (
+                        silver_post_id, aggregated_label, aggregated_score
+                    )
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (silver_post_id) DO UPDATE SET
+                        aggregated_label = EXCLUDED.aggregated_label,
+                        aggregated_score = EXCLUDED.aggregated_score
+                    """,
+                    (silver_post_id, agg_label, agg_score)
+                )
+
+                # Success: Track ID for MongoDB update later
+                processed_mongo_ids.append(raw_doc["_id"])
 
         # 6. ATOMIC COMMIT
         pg_conn.commit()

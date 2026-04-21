@@ -27,11 +27,11 @@ class RedditPipeline:
     def ingest(self, keyword, request_id):
         ingest_reddit(keyword, request_id)
 
-    def process(self, request_id):
-        process_reddit(request_id)
+    def process(self, request_id, mode='sentiment'):
+        process_reddit(request_id, mode=mode)
 
-    def aggregate(self, keyword, request_id):
-        run_gold_etl(keyword, request_id, platform='reddit')
+    def aggregate(self, keyword, request_id, mode='sentiment'):
+        run_gold_etl(keyword, request_id, platform='reddit', mode=mode)
 
 
 class TwitterPipeline:
@@ -40,11 +40,11 @@ class TwitterPipeline:
     def ingest(self, keyword, request_id):
         ingest_twitter(keyword, request_id)
 
-    def process(self, request_id):
-        run_silver_twitter(request_id)
+    def process(self, request_id, mode='sentiment'):
+        run_silver_twitter(request_id, mode=mode)
 
-    def aggregate(self, keyword, request_id):
-        run_gold_etl(keyword, request_id, platform='twitter')
+    def aggregate(self, keyword, request_id, mode='sentiment'):
+        run_gold_etl(keyword, request_id, platform='twitter', mode=mode)
 
 
 # Central registry mapping platform names to Runner implementations

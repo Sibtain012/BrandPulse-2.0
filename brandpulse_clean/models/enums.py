@@ -103,3 +103,36 @@ _SENTIMENT_DIM_IDS = {
     SentimentLabel.NEUTRAL: 2,
     SentimentLabel.POSITIVE: 3,
 }
+
+
+# ---------------------------------------------------------------------------
+# Intent Label — matches dim_intent rows exactly
+# IDs mirror dim_intent.intent_id in PostgreSQL:
+#   Complaint → 1
+#   Inquiry   → 2
+#   Praise    → 3
+# ---------------------------------------------------------------------------
+class IntentLabel(str, Enum):
+    COMPLAINT = "Complaint"
+    INQUIRY = "Inquiry"
+    PRAISE = "Praise"
+
+    @property
+    def dim_id(self) -> int:
+        """Return the corresponding dim_intent.intent_id."""
+        return _INTENT_DIM_IDS[self]
+
+
+_INTENT_DIM_IDS = {
+    IntentLabel.COMPLAINT: 1,
+    IntentLabel.INQUIRY: 2,
+    IntentLabel.PRAISE: 3,
+}
+
+
+# ---------------------------------------------------------------------------
+# Analysis Mode — sentinel values for mode parameter throughout the pipeline
+# ---------------------------------------------------------------------------
+class AnalysisMode(str, Enum):
+    SENTIMENT = "sentiment"
+    INTENT = "intent"

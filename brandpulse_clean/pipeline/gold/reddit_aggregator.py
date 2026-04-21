@@ -85,58 +85,102 @@ AND (gk.end_date IS NULL OR DATE(sc.comment_created_at_utc) <= gk.end_date)
 ON CONFLICT ON CONSTRAINT fact_sentiment_events_unique_content DO NOTHING;
 """
 
+# =====================================================
+# INTENT SQL — writes to fact_intent_events (NOT fact_sentiment_events)
+# =====================================================
+INSERT_POST_INTENT_SQL = """
+INSERT INTO fact_intent_events (
+    silver_content_id, model_id, platform_id, content_type_id,
+    intent_id, date_id, time_id, intent_score, request_id
+)
+SELECT
+    sp.silver_post_id,
+    2,    -- Model: intent classifier
+    1,    -- Platform: Reddit
+    1,    -- Content Type: Post
+    di.intent_id,
+    COALESCE(dd.date_id, 20251231),
+    COALESCE(dt.time_id, 1200),
+    sp.intent_score,
+    %s
+FROM silver_reddit_posts_intent sp
+JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+JOIN dim_intent di ON di.intent_label = sp.intent_label
+LEFT JOIN dim_date dd ON dd.calendar_date = DATE(sp.created_at_utc)
+LEFT JOIN dim_time dt ON dt.time_id = (EXTRACT(HOUR FROM sp.created_at_utc) * 100 + EXTRACT(MINUTE FROM sp.created_at_utc))
+WHERE sp.global_keyword_id = %s
+  AND sp.intent_label IS NOT NULL
+  AND sp.gold_processed = FALSE
+  AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
+  AND (gk.end_date   IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
+ON CONFLICT ON CONSTRAINT fact_intent_events_unique_content DO NOTHING;
+"""
+
 
 # =====================================================
-# MAIN FUNCTION
+# MAIN FUNCTION — mode-aware
 # =====================================================
 
-def run_reddit_gold(keyword, request_id):
+def run_reddit_gold(keyword, request_id, mode='sentiment'):
     """
     Aggregate Silver Reddit data into Gold fact tables.
     
-    Executes in a single transaction:
-    1. Insert post sentiments into fact_sentiment_events
-    2. Insert comment sentiments into fact_sentiment_events
-    3. Mark silver_reddit_posts as gold_processed
-    4. Mark silver_reddit_comment_sentiment_summary as gold_processed
-    
-    On any failure the entire transaction is rolled back.
+    When mode='intent', reads from silver_reddit_posts_intent and writes
+    to fact_intent_events. No comment aggregation in intent mode (TD-NEW-01).
+    When mode='sentiment' (default), original behavior is preserved.
     """
     conn = get_pg_connection()
     conn.autocommit = False
     try:
         with conn.cursor() as cur:
-            # 1. Insert POSTS into fact table
-            cur.execute(INSERT_POST_SENTIMENT_SQL, (request_id, request_id))
-            posts_inserted = cur.rowcount
-            print(f"[GOLD] Inserted {posts_inserted} post sentiment rows.")
+            if mode == 'intent':
+                # INTENT: posts only, separate fact table
+                cur.execute(INSERT_POST_INTENT_SQL, (request_id, request_id))
+                posts_inserted = cur.rowcount
+                print(f"[GOLD] Inserted {posts_inserted} post intent rows into fact_intent_events.")
 
-            # 2. Insert COMMENTS into fact table
-            cur.execute(INSERT_COMMENT_SENTIMENT_SQL, (request_id, request_id))
-            comments_inserted = cur.rowcount
-            print(f"[GOLD] Inserted {comments_inserted} comment sentiment rows.")
+                # No comments in intent mode — future improvement (TD-NEW-01)
 
-            # 3. Mark Silver posts as gold_processed
-            cur.execute("""
-                UPDATE silver_reddit_posts 
-                SET gold_processed = TRUE 
-                WHERE global_keyword_id = %s AND gold_processed = FALSE
-            """, (request_id,))
-            print(f"[GOLD] Marked {cur.rowcount} silver posts as gold_processed.")
+                # Mark intent silver posts as gold_processed
+                cur.execute("""
+                    UPDATE silver_reddit_posts_intent
+                    SET gold_processed = TRUE
+                    WHERE global_keyword_id = %s AND gold_processed = FALSE
+                """, (request_id,))
+                print(f"[GOLD] Marked {cur.rowcount} intent silver posts as gold_processed.")
+            else:
+                # SENTIMENT: original code, unchanged
+                # 1. Insert POSTS into fact table
+                cur.execute(INSERT_POST_SENTIMENT_SQL, (request_id, request_id))
+                posts_inserted = cur.rowcount
+                print(f"[GOLD] Inserted {posts_inserted} post sentiment rows.")
 
-            # 4. Mark comment summaries as gold_processed
-            cur.execute("""
-                UPDATE silver_reddit_comment_sentiment_summary css
-                SET gold_processed = TRUE
-                FROM silver_reddit_posts sp
-                WHERE css.silver_post_id = sp.silver_post_id
-                AND sp.global_keyword_id = %s
-                AND css.gold_processed = FALSE
-            """, (request_id,))
-            print(f"[GOLD] Marked {cur.rowcount} comment summaries as gold_processed.")
+                # 2. Insert COMMENTS into fact table
+                cur.execute(INSERT_COMMENT_SENTIMENT_SQL, (request_id, request_id))
+                comments_inserted = cur.rowcount
+                print(f"[GOLD] Inserted {comments_inserted} comment sentiment rows.")
+
+                # 3. Mark Silver posts as gold_processed
+                cur.execute("""
+                    UPDATE silver_reddit_posts 
+                    SET gold_processed = TRUE 
+                    WHERE global_keyword_id = %s AND gold_processed = FALSE
+                """, (request_id,))
+                print(f"[GOLD] Marked {cur.rowcount} silver posts as gold_processed.")
+
+                # 4. Mark comment summaries as gold_processed
+                cur.execute("""
+                    UPDATE silver_reddit_comment_sentiment_summary css
+                    SET gold_processed = TRUE
+                    FROM silver_reddit_posts sp
+                    WHERE css.silver_post_id = sp.silver_post_id
+                    AND sp.global_keyword_id = %s
+                    AND css.gold_processed = FALSE
+                """, (request_id,))
+                print(f"[GOLD] Marked {cur.rowcount} comment summaries as gold_processed.")
 
         conn.commit()
-        print(f"[GOLD] Transaction committed for reddit.")
+        print(f"[GOLD] Transaction committed for reddit ({mode}).")
     except Exception as e:
         conn.rollback()
         raise e

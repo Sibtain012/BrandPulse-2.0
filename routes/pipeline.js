@@ -65,9 +65,9 @@ async function saveTwitterAnalysisToHistory(
                 total_posts, total_comments,
                 dominant_sentiment, avg_sentiment_score,
                 avg_post_sentiment_score, avg_comment_sentiment_score,
-                request_id, platform_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            ON CONFLICT (user_id, keyword, start_date, end_date, platform_id)
+                request_id, platform_id, analysis_mode
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'sentiment')
+            ON CONFLICT ON CONSTRAINT analysis_history_user_mode_unique
             DO UPDATE SET
                 total_posts = EXCLUDED.total_posts,
                 total_comments = EXCLUDED.total_comments,
@@ -205,9 +205,9 @@ async function saveAnalysisToHistory(
                 total_posts, total_comments, 
                 dominant_sentiment, avg_sentiment_score,
                 avg_post_sentiment_score, avg_comment_sentiment_score,
-                request_id, platform_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-            ON CONFLICT (user_id, keyword, start_date, end_date, platform_id) 
+                request_id, platform_id, analysis_mode
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'sentiment')
+            ON CONFLICT ON CONSTRAINT analysis_history_user_mode_unique
             DO UPDATE SET
                 total_posts = EXCLUDED.total_posts,
                 total_comments = EXCLUDED.total_comments,
@@ -243,6 +243,125 @@ async function saveAnalysisToHistory(
   }
 }
 
+// ============================================================
+// NEW: Intent analysis history saver
+// ============================================================
+async function saveIntentAnalysisToHistory(
+  requestId,
+  keyword,
+  userId,
+  startDate,
+  endDate,
+  platformId,
+) {
+  try {
+    console.log(
+      `[History] Saving intent analysis for Request ID: ${requestId}`,
+    );
+
+    // Determine which silver intent table to query
+    let intentQuery;
+    if (platformId === 2) {
+      intentQuery = await pool.query(
+        `
+        SELECT
+            COUNT(*)::INT as total,
+            COUNT(*) FILTER (WHERE LOWER(intent_label) = 'complaint') as complaint_count,
+            COUNT(*) FILTER (WHERE LOWER(intent_label) = 'inquiry')  as inquiry_count,
+            COUNT(*) FILTER (WHERE LOWER(intent_label) = 'praise')   as praise_count,
+            AVG(intent_score) as avg_score
+        FROM silver_twitter_tweets_intent st
+        JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
+        WHERE st.global_keyword_id = $1
+        AND (gk.start_date IS NULL OR DATE(st.tweet_created_at) >= gk.start_date)
+        AND (gk.end_date   IS NULL OR DATE(st.tweet_created_at) <= gk.end_date)
+        `,
+        [requestId],
+      );
+    } else {
+      intentQuery = await pool.query(
+        `
+        SELECT
+            COUNT(*)::INT as total,
+            COUNT(*) FILTER (WHERE LOWER(intent_label) = 'complaint') as complaint_count,
+            COUNT(*) FILTER (WHERE LOWER(intent_label) = 'inquiry')  as inquiry_count,
+            COUNT(*) FILTER (WHERE LOWER(intent_label) = 'praise')   as praise_count,
+            AVG(intent_score) as avg_score
+        FROM silver_reddit_posts_intent sp
+        JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+        WHERE sp.global_keyword_id = $1
+        AND (gk.start_date IS NULL OR DATE(sp.created_at_utc) >= gk.start_date)
+        AND (gk.end_date   IS NULL OR DATE(sp.created_at_utc) <= gk.end_date)
+        `,
+        [requestId],
+      );
+    }
+
+    const data = intentQuery.rows[0];
+    const total = parseInt(data.total) || 0;
+
+    if (total === 0) {
+      console.log(
+        `[History] No intent data for Request ID: ${requestId}, skipping`,
+      );
+      return;
+    }
+
+    const intentCounts = {
+      Complaint: parseInt(data.complaint_count) || 0,
+      Inquiry: parseInt(data.inquiry_count) || 0,
+      Praise: parseInt(data.praise_count) || 0,
+    };
+
+    const dominantIntent = Object.keys(intentCounts).reduce((a, b) =>
+      intentCounts[a] > intentCounts[b] ? a : b,
+    );
+
+    const avgScore = parseFloat(data.avg_score) || 0;
+
+    await pool.query(
+      `
+      INSERT INTO analysis_history (
+          keyword, user_id, start_date, end_date,
+          total_posts, total_comments,
+          avg_sentiment_score,
+          request_id, platform_id, analysis_mode,
+          dominant_intent, intent_distribution
+      ) VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'intent', $9, $10)
+      ON CONFLICT ON CONSTRAINT analysis_history_user_mode_unique
+      DO UPDATE SET
+          total_posts = EXCLUDED.total_posts,
+          avg_sentiment_score = EXCLUDED.avg_sentiment_score,
+          dominant_intent = EXCLUDED.dominant_intent,
+          intent_distribution = EXCLUDED.intent_distribution,
+          analysis_timestamp = CURRENT_TIMESTAMP
+      `,
+      [
+        keyword,
+        userId,
+        startDate,
+        endDate,
+        total,
+        avgScore,
+        requestId,
+        platformId,
+        dominantIntent,
+        JSON.stringify(intentCounts),
+      ],
+    );
+
+    console.log(
+      `[History] Saved intent analysis for Request ID: ${requestId} (${total} items, dominant: ${dominantIntent})`,
+    );
+  } catch (error) {
+    console.error(
+      "[History] Error saving intent analysis_history:",
+      error.message,
+    );
+    throw error;
+  }
+}
+
 // NEW: Polling Route for React Hook
 router.get("/status/id/:requestId", async (req, res) => {
   try {
@@ -264,13 +383,19 @@ router.post("/analyze", async (req, res) => {
     start_date,
     end_date,
     platform: rawPlatform,
+    analysis_mode: rawMode,
   } = req.body;
 
   // Normalize + validate platform
   const platform = (rawPlatform || "reddit").toString().toLowerCase();
+  const mode = (rawMode || "sentiment").toString().toLowerCase();
   const PLATFORM_IDS = { reddit: 1, twitter: 2 };
+  const VALID_MODES = ["sentiment", "intent"];
   if (!(platform in PLATFORM_IDS)) {
     return res.status(400).json({ error: `Unsupported platform: ${platform}` });
+  }
+  if (!VALID_MODES.includes(mode)) {
+    return res.status(400).json({ error: `Unsupported analysis mode: ${mode}` });
   }
   const platformId = PLATFORM_IDS[platform];
 
@@ -281,6 +406,7 @@ router.post("/analyze", async (req, res) => {
     start_date,
     end_date,
     platform,
+    mode,
   });
 
   if (!keyword || !user_id) {
@@ -294,35 +420,39 @@ router.post("/analyze", async (req, res) => {
 
   try {
     // 2. SMART CACHE: Check for existing data with coverage calculation
-    console.log("[Cache] Checking cache coverage...");
-    const cacheResult = await calculateCacheCoverage(
-      pool,
-      keyword,
-      user_id,
-      finalStartDate,
-      finalEndDate,
-      platformId,
-    );
+    // Intent mode bypasses cache for now (TD-NEW-04)
+    if (mode === "sentiment") {
+      console.log("[Cache] Checking cache coverage...");
+      const cacheResult = await calculateCacheCoverage(
+        pool,
+        keyword,
+        user_id,
+        finalStartDate,
+        finalEndDate,
+        platformId,
+      );
 
-    console.log(`[Cache] ${cacheResult.reason}`);
+      console.log(`[Cache] ${cacheResult.reason}`);
 
-    if (cacheResult.coverage >= 75) {
-      // CACHE HIT: Return existing analysis
-      return res.status(200).json({
-        message: `Using cached analysis (${cacheResult.coverage.toFixed(1)}% date range coverage)`,
-        status: "COMPLETED",
-        requestId: cacheResult.bestMatch.requestId,
-        trigger: false,
-        cached: true,
-        cacheInfo: {
-          coverage: cacheResult.coverage,
-          cachedDateRange: {
-            start: cacheResult.bestMatch.startDate,
-            end: cacheResult.bestMatch.endDate,
+      if (cacheResult.coverage >= 75) {
+        // CACHE HIT: Return existing analysis
+        return res.status(200).json({
+          message: `Using cached analysis (${cacheResult.coverage.toFixed(1)}% date range coverage)`,
+          status: "COMPLETED",
+          requestId: cacheResult.bestMatch.requestId,
+          trigger: false,
+          cached: true,
+          analysisMode: mode,
+          cacheInfo: {
+            coverage: cacheResult.coverage,
+            cachedDateRange: {
+              start: cacheResult.bestMatch.startDate,
+              end: cacheResult.bestMatch.endDate,
+            },
+            lastAnalyzed: cacheResult.bestMatch.lastRunAt,
           },
-          lastAnalyzed: cacheResult.bestMatch.lastRunAt,
-        },
-      });
+        });
+      }
     }
 
     // CACHE MISS: Create new analysis
@@ -333,28 +463,30 @@ router.post("/analyze", async (req, res) => {
     // 3. CREATE NEW RECORD (allow multiple analyses of same keyword per platform)
     const result = await pool.query(
       `
-            INSERT INTO global_keywords (keyword, user_id, platform_id, status, bronze_processed, last_run_at, start_date, end_date)
-            VALUES ($1, $2, $3, 'PROCESSING', FALSE, NOW(), $4, $5)
+            INSERT INTO global_keywords (keyword, user_id, platform_id, status, bronze_processed, last_run_at, start_date, end_date, analysis_mode)
+            VALUES ($1, $2, $3, 'PROCESSING', FALSE, NOW(), $4, $5, $6)
             ON CONFLICT (user_id, keyword, platform_id)
             DO UPDATE SET
                 status = 'PROCESSING',
                 bronze_processed = FALSE,
                 last_run_at = NOW(),
                 start_date = EXCLUDED.start_date,
-                end_date = EXCLUDED.end_date
+                end_date = EXCLUDED.end_date,
+                analysis_mode = EXCLUDED.analysis_mode
             RETURNING global_keyword_id
         `,
-      [keyword, user_id, platformId, finalStartDate, finalEndDate],
+      [keyword, user_id, platformId, finalStartDate, finalEndDate, mode],
     );
 
     const requestId = result.rows[0].global_keyword_id;
 
     // 4. RESPOND TO FRONTEND IMMEDIATELY
     res.status(202).json({
-      message: "Analysis started",
+      message: `Analysis started (mode: ${mode})`,
       trigger: true,
       status: "PROCESSING",
       requestId: requestId,
+      analysisMode: mode,
     });
 
     const pythonExe = process.env.PYTHON_EXE_PATH || "python";
@@ -369,12 +501,14 @@ router.post("/analyze", async (req, res) => {
       keyword,
       requestId.toString(),
       platform,
+      mode,
     ]);
     const pythonProcess = spawn(pythonExe, [
       pythonScript,
       keyword,
       requestId.toString(), // Request ID
       platform, // Platform (reddit | twitter)
+      mode,     // Analysis mode (sentiment | intent)
     ]);
     pythonProcess.stdout.on("data", (data) =>
       console.log(`Python Output: ${data}`),
@@ -397,9 +531,18 @@ router.post("/analyze", async (req, res) => {
           [requestId],
         );
 
-        // Save results to analysis_history (route by platform)
+        // Save results to analysis_history (route by platform AND mode)
         try {
-          if (platform === "twitter") {
+          if (mode === "intent") {
+            await saveIntentAnalysisToHistory(
+              requestId,
+              keyword,
+              user_id,
+              finalStartDate,
+              finalEndDate,
+              platformId,
+            );
+          } else if (platform === "twitter") {
             await saveTwitterAnalysisToHistory(
               requestId,
               keyword,
@@ -417,7 +560,7 @@ router.post("/analyze", async (req, res) => {
             );
           }
           console.log(
-            `✅ Analysis results saved to history (ID: ${requestId})`,
+            `✅ Analysis results saved to history (ID: ${requestId}, mode: ${mode})`,
           );
         } catch (historyErr) {
           console.error(

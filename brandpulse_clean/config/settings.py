@@ -48,3 +48,12 @@ SENTIMENT_MODEL: str = os.getenv(
     "SENTIMENT_MODEL",
     "ibrahimtime/bertweet-sentiment-finetuned",
 )
+
+# ---------------------------------------------------------------------------
+# Intent Model
+# ---------------------------------------------------------------------------
+# Override via INTENT_MODEL env var without code changes.
+INTENT_MODEL: str = os.getenv(
+    "INTENT_MODEL",
+    "ibrahimtime/bertweet-intent-classifier-v2",
+)

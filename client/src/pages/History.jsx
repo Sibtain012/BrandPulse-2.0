@@ -9,7 +9,7 @@ const PlatformIcon = ({ platformId }) => {
     if (platformId === 2) {
         return (
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-accent-blue-light/20 text-accent-blue-dark rounded-full text-xs font-medium">
-                <span>🐦</span>
+                <img src="/images/twitter-logo.jpg" alt="Twitter" className="w-3 h-3 object-contain rounded-xs" />
                 <span>Twitter</span>
             </span>
         );
@@ -17,7 +17,7 @@ const PlatformIcon = ({ platformId }) => {
     // Default to Reddit (platformId === 1 or undefined)
     return (
         <span className="inline-flex items-center gap-1 px-2 py-1 bg-accent-amber-light/20 text-accent-amber-dark rounded-full text-xs font-medium">
-            <span>🔴</span>
+            <img src="/images/reddit-logo.png" alt="Reddit" className="w-3 h-3 object-contain" />
             <span>Reddit</span>
         </span>
     );
@@ -70,8 +70,31 @@ const History = () => {
         }
     };
 
-    const handleViewDetails = (requestId) => {
-        navigate(`/sentiment-analysis?requestId=${requestId}`);
+    const handleViewDetails = (analysis) => {
+        const platform = analysis.platform_id === 2 ? 'twitter' : 'reddit';
+        if (analysis.analysis_mode === 'intent') {
+            navigate(`/intent-analysis?requestId=${analysis.request_id}&platform=${platform}`);
+        } else {
+            navigate(`/sentiment-analysis?requestId=${analysis.request_id}`);
+        }
+    };
+
+    const getIntentColor = (intent) => {
+        switch (intent?.toLowerCase()) {
+            case 'complaint': return 'text-accent-red-dark bg-accent-red-light/20';
+            case 'inquiry': return 'text-accent-blue-dark bg-accent-blue-light/20';
+            case 'praise': return 'text-accent-green-dark bg-accent-green-light/20';
+            default: return 'text-light-600 bg-light-100';
+        }
+    };
+
+    const ModeBadge = ({ mode }) => {
+        const isIntent = mode === 'intent';
+        return (
+            <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wide ${isIntent ? 'bg-purple-100 text-purple-700' : 'bg-brand-50 text-brand-700'}`}>
+                {isIntent ? 'Intent' : 'Sentiment'}
+            </span>
+        );
     };
 
     const formatDate = (dateStr) => {
@@ -184,6 +207,9 @@ const History = () => {
                                             </h3>
                                             <PlatformIcon platformId={analysis.platform_id} />
                                         </div>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <ModeBadge mode={analysis.analysis_mode} />
+                                        </div>
                                         <p className="text-sm text-gray-500">
                                             {formatDate(analysis.analysis_timestamp)}
                                         </p>
@@ -208,15 +234,21 @@ const History = () => {
                                         </div>
                                     </div>
 
-                                    {/* Dominant Sentiment Badge */}
+                                    {/* Dominant Badge — intent OR sentiment */}
                                     <div className="mb-4">
-                                        <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getSentimentColor(analysis.dominant_sentiment)}`}>
-                                            {analysis.dominant_sentiment ? analysis.dominant_sentiment.charAt(0).toUpperCase() + analysis.dominant_sentiment.slice(1) : 'N/A'}
-                                        </span>
+                                        {analysis.analysis_mode === 'intent' ? (
+                                            <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getIntentColor(analysis.dominant_intent)}`}>
+                                                {analysis.dominant_intent ? analysis.dominant_intent.charAt(0).toUpperCase() + analysis.dominant_intent.slice(1) : 'N/A'}
+                                            </span>
+                                        ) : (
+                                            <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${getSentimentColor(analysis.dominant_sentiment)}`}>
+                                                {analysis.dominant_sentiment ? analysis.dominant_sentiment.charAt(0).toUpperCase() + analysis.dominant_sentiment.slice(1) : 'N/A'}
+                                            </span>
+                                        )}
                                     </div>
 
-                                    {/* Sentiment Scores */}
-                                    {(analysis.avg_post_sentiment_score !== null || analysis.avg_comment_sentiment_score !== null) && (
+                                    {/* Scores — sentiment only */}
+                                    {analysis.analysis_mode !== 'intent' && (analysis.avg_post_sentiment_score !== null || analysis.avg_comment_sentiment_score !== null) && (
                                         <div className="mb-4 text-sm">
                                             <div className="flex justify-between items-center py-1">
                                                 <span className="text-light-600">Posts Avg Score:</span>
@@ -239,7 +271,7 @@ const History = () => {
 
                                     {/* Action Button */}
                                     <button
-                                        onClick={() => handleViewDetails(analysis.request_id)}
+                                        onClick={() => handleViewDetails(analysis)}
                                         className="w-full px-4 py-2 bg-brand-600 text-white rounded-lg hover:bg-brand-700 transition-colors text-sm font-medium"
                                     >
                                         View Details

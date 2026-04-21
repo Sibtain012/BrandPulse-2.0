@@ -1,7 +1,7 @@
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import { Link } from 'react-router-dom';
-import { ArrowRight, BarChart2, Shield, Clock } from 'lucide-react';
+import { ArrowRight, BarChart2, Shield, Clock, Target } from 'lucide-react';
 
 const Landing = () => {
     return (
@@ -45,7 +45,7 @@ const Landing = () => {
                     </div>
 
                     {/* Clickable Feature Cards */}
-                    <div className="grid md:grid-cols-3 gap-6 mt-20 text-left">
+                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mt-20 text-left">
                         {/* Sentiment Analysis Card */}
                         <Link
                             to="/sentiment-analysis"
@@ -60,6 +60,22 @@ const Landing = () => {
                             <h3 className="font-bold text-lg text-gray-900">Sentiment Analysis</h3>
                             <p className="text-gray-600 mt-2">Analyze brand sentiment from Reddit & Twitter in real-time using AI</p>
                             <span className="mt-4 text-blue-600 font-medium text-sm inline-block">Start analyzing →</span>
+                        </Link>
+
+                        {/* Intent Classification Card */}
+                        <Link
+                            to="/intent-analysis"
+                            className="group p-6 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-100 border border-amber-200 hover:border-amber-400 hover:shadow-xl transition-all duration-300"
+                        >
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-amber-600">
+                                    <Target className="w-6 h-6" />
+                                </div>
+                                <ArrowRight className="w-5 h-5 text-amber-600 group-hover:translate-x-1 transition-transform" />
+                            </div>
+                            <h3 className="font-bold text-lg text-gray-900">Intent Classification</h3>
+                            <p className="text-gray-600 mt-2">Classify user intent as Complaint, Inquiry, or Praise with AI</p>
+                            <span className="mt-4 text-amber-600 font-medium text-sm inline-block">Classify intent →</span>
                         </Link>
 
                         {/* History Card */}
@@ -100,11 +116,11 @@ const Landing = () => {
                         <p className="text-sm text-gray-400 mb-4">Supported Platforms</p>
                         <div className="flex justify-center gap-6">
                             <div className="flex items-center gap-2 px-4 py-2 bg-orange-50 rounded-full">
-                                <span className="text-xl">🔴</span>
+                                <img src="/images/reddit-logo.png" alt="Reddit" className="w-5 h-5 object-contain" />
                                 <span className="font-medium text-orange-700">Reddit</span>
                             </div>
                             <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 rounded-full">
-                                <span className="text-xl">🐦</span>
+                                <img src="/images/twitter-logo.jpg" alt="Twitter" className="w-5 h-5 object-contain rounded-sm" />
                                 <span className="font-medium text-blue-700">Twitter</span>
                             </div>
                         </div>

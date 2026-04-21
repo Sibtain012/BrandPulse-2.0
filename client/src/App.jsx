@@ -9,6 +9,7 @@ import Register from './pages/Registration';
 import Profile from './pages/Profile';
 import Landing from './pages/Landing';
 import SentimentAnalysis from './pages/SentimentAnalysis';
+import IntentAnalysis from './pages/IntentAnalysis';
 import History from './pages/History';
 
 function App() {
@@ -27,6 +28,7 @@ function App() {
 
                     {/* Protected Routes — unauthenticated users are redirected to /login */}
                     <Route path="/sentiment-analysis" element={<ProtectedRoute><SentimentAnalysis /></ProtectedRoute>} />
+                    <Route path="/intent-analysis" element={<ProtectedRoute><IntentAnalysis /></ProtectedRoute>} />
                     <Route path="/history" element={<ProtectedRoute><History /></ProtectedRoute>} />
                     <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
                 </Routes>
