@@ -48,6 +48,36 @@ def detect_comment_format(comment: dict) -> dict:
     return comment
 
 
+def _resolve_subreddit_name(post: dict, raw_doc: dict) -> str | None:
+    """
+    Pick subreddit display name with fallbacks for older bronze docs.
+    """
+    prefixed = post.get("subreddit_name_prefixed")
+    if prefixed:
+        return prefixed
+    plain = post.get("subreddit")
+    if plain:
+        return f"r/{plain}"
+    meta_sr = raw_doc.get("meta", {}).get("subreddit")
+    if meta_sr:
+        return f"r/{meta_sr}"
+    return None
+
+
+def _resolve_post_url(post: dict, post_id_val: str) -> str | None:
+    """
+    Return a real Reddit permalink for the post. Older bronze docs only have
+    submission.url (which is the *external link* for link-posts). Fall back
+    to constructing the permalink from the Reddit thing-name (t3_<id>).
+    """
+    permalink = post.get("permalink")
+    if permalink:
+        return f"https://www.reddit.com{permalink}"
+    if post_id_val and post_id_val.startswith("t3_"):
+        return f"https://www.reddit.com/comments/{post_id_val[3:]}/"
+    return post.get("url")
+
+
 def run_silver(request_id, batch_size=50, mode="sentiment"):
     """
     Main Silver Layer process: Cleans data, runs classification model,
@@ -198,7 +228,9 @@ def run_silver(request_id, batch_size=50, mode="sentiment"):
                         str(raw_doc["_id"]), "reddit", item["keyword"], rid,
                         post_id_val,
                         item["title_clean"], item["body_clean"], hash_author(post.get("author")),
-                        post.get("subreddit_name_prefixed"), post.get("url"), post.get("score", 0),
+                        _resolve_subreddit_name(post, raw_doc),
+                        _resolve_post_url(post, post_id_val),
+                        post.get("score", 0),
                         post.get("upvote_ratio", 0), post.get("num_comments", 0),
                         post_classification["label"], post_classification["score"],
                         datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc),
@@ -233,7 +265,9 @@ def run_silver(request_id, batch_size=50, mode="sentiment"):
                         str(raw_doc["_id"]), "reddit", item["keyword"], rid,
                         post_id_val,
                         item["title_clean"], item["body_clean"], hash_author(post.get("author")),
-                        post.get("subreddit_name_prefixed"), post.get("url"), post.get("score", 0),
+                        _resolve_subreddit_name(post, raw_doc),
+                        _resolve_post_url(post, post_id_val),
+                        post.get("score", 0),
                         post.get("upvote_ratio", 0), post.get("num_comments", 0),
                         post_classification["label"], post_classification["score"],
                         datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc),

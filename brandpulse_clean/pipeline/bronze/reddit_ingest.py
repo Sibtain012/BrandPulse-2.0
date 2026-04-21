@@ -135,7 +135,12 @@ def extract_submission(submission):
         "author": str(submission.author),
         "score": submission.score,
         "created_utc": submission.created_utc,
-        "url": submission.url
+        "url": submission.url,
+        "permalink": getattr(submission, "permalink", None),
+        "subreddit": submission.subreddit.display_name,
+        "subreddit_name_prefixed": f"r/{submission.subreddit.display_name}",
+        "upvote_ratio": getattr(submission, "upvote_ratio", None),
+        "num_comments": getattr(submission, "num_comments", 0),
     }
 
     comments_data = []
