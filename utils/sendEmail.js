@@ -4,13 +4,21 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const sendEmail = async (options) => {
-    // 1. Create the Transporter (The Postman)
+            // Use port 587 (STARTTLS) instead of 465 (SMTPS).
+    // Port 465 is frequently blocked by ISPs/firewalls, causing
+    // "Client network socket disconnected before secure TLS connection".
     const transporter = nodemailer.createTransport({
-        service: process.env.EMAIL_SERVICE, // or use 'host' and 'port' for other providers
+        host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+        port: Number(process.env.EMAIL_PORT) || 587,
+        secure: false, // false = STARTTLS upgrade on 587
+        requireTLS: true,
         auth: {
             user: process.env.EMAIL_USER,
             pass: process.env.EMAIL_PASS,
         },
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 15000,
     });
 
     // 2. Define the Email Options

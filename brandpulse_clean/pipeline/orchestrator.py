@@ -42,7 +42,7 @@ def update_status_by_id(request_id, status):
         print(f"[ORCHESTRATOR ERROR]: Failed to update status to {status} for ID {request_id}: {e}")
 
 
-def run_pipeline(keyword, request_id, platform='reddit'):
+def run_pipeline(keyword, request_id, platform='reddit', mode='sentiment'):
     """
     Main pipeline orchestrator. Executes Bronze → Silver → Gold
     for the given keyword and platform using the registry pattern.
@@ -55,27 +55,30 @@ def run_pipeline(keyword, request_id, platform='reddit'):
         The global_keyword_id from the MERN backend.
     platform : str
         Target platform (default: 'reddit').
+    mode : str
+        'sentiment' (default) or 'intent'. Controls which model runs
+        and which silver/gold tables receive the output.
     """
-    print(f"--- STARTING PIPELINE FOR: {keyword} (Request ID: {request_id}, Platform: {platform}) ---")
+    print(f"--- STARTING PIPELINE FOR: {keyword} (Request ID: {request_id}, Platform: {platform}, Mode: {mode}) ---")
 
     try:
         pipeline = get_pipeline(platform)
 
-        # 1. BRONZE: Fetch from platform
+        # 1. BRONZE: Fetch from platform (mode-agnostic — raw data is raw data)
         print(f"[STEP 1/3] Ingesting raw {platform} data into MongoDB...")
         pipeline.ingest(keyword, request_id)
 
-        # 2. SILVER: Analyze with RoBERTa AI
-        print(f"[STEP 2/3] Cleaning text and running sentiment analysis for {platform}...")
-        pipeline.process(request_id)
+        # 2. SILVER: Classify with AI model (mode-aware)
+        print(f"[STEP 2/3] Cleaning text and running {mode} analysis for {platform}...")
+        pipeline.process(request_id, mode=mode)
 
-        # 3. GOLD: Aggregate into Fact Tables
+        # 3. GOLD: Aggregate into Fact Tables (mode-aware)
         print("[STEP 3/3] Aggregating results for the Dashboard...")
-        pipeline.aggregate(keyword, request_id)
+        pipeline.aggregate(keyword, request_id, mode=mode)
 
         # SUCCESS SIGNAL: Updates the specific request record to COMPLETED
         update_status_by_id(request_id, PipelineStatus.COMPLETED.value)
-        print(f"--- PIPELINE COMPLETED SUCCESSFULLY FOR: {keyword} ({platform}) ---")
+        print(f"--- PIPELINE COMPLETED SUCCESSFULLY FOR: {keyword} ({platform}, {mode}) ---")
 
     except Exception as e:
         # FAILURE SIGNAL: Updates the specific request record to FAILED
