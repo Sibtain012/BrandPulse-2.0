@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const sendEmail = async (options) => {
-    // Use port 587 (STARTTLS) instead of 465 (SMTPS).
+            // Use port 587 (STARTTLS) instead of 465 (SMTPS).
     // Port 465 is frequently blocked by ISPs/firewalls, causing
     // "Client network socket disconnected before secure TLS connection".
     const transporter = nodemailer.createTransport({
