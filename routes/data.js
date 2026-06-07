@@ -448,8 +448,8 @@ router.get("/history/:userId", async (req, res) => {
       offset,
     });
   } catch (err) {
-    console.error("History fetch failed:", err.message);
-    res.status(500).json({ error: "Failed to fetch analysis history" });
+    console.error("History fetch failed:", err);
+    res.status(500).json({ error: "Failed to fetch analysis history", detail: err.message, code: err.code });
   }
 });
 
