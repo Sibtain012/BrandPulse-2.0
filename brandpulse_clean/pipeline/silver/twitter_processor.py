@@ -93,6 +93,9 @@ def run_silver_twitter(request_id, batch_size=50, mode="sentiment"):
         if mode == AnalysisMode.INTENT.value:
             from pipeline.silver.intent import run_intent_batch
             all_scores = run_intent_batch(texts_to_score)
+        elif mode == AnalysisMode.COMPLAINT.value:
+            from pipeline.silver.complaint import run_complaint_batch
+            all_scores = run_complaint_batch(texts_to_score)
         else:
             all_scores = run_sentiment_batch(texts_to_score)
     except Exception as e:
@@ -141,6 +144,31 @@ def run_silver_twitter(request_id, batch_size=50, mode="sentiment"):
                         tweet_id, text_clean, tweet_created_at,
                         favorite_count, retweet_count, reply_count, quote_count,
                         intent_label, intent_score, processed_at
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (tweet_id, global_keyword_id) DO NOTHING
+                    RETURNING silver_tweet_id
+                    """,
+                    (
+                        str(raw_doc["_id"]), item["keyword"], rid,
+                        str(tweet_id), item["cleaned_text"], created_at,
+                        tweet.get("favorite_count", 0),
+                        tweet.get("retweet_count", 0),
+                        tweet.get("reply_count", 0),
+                        tweet.get("quote_count", 0),
+                        sentiment["label"], sentiment["score"],
+                        datetime.now(timezone.utc)
+                    )
+                )
+            elif mode == AnalysisMode.COMPLAINT.value:
+                # ========== COMPLAINT BRANCH: write to silver_twitter_tweets_complaint ==========
+                cursor_pg.execute(
+                    """
+                    INSERT INTO silver_twitter_tweets_complaint (
+                        original_bronze_id, keyword, global_keyword_id,
+                        tweet_id, text_clean, tweet_created_at,
+                        favorite_count, retweet_count, reply_count, quote_count,
+                        complaint_label, complaint_score, processed_at
                     )
                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (tweet_id, global_keyword_id) DO NOTHING

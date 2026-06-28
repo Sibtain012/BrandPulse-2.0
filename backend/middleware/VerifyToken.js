@@ -4,6 +4,7 @@ export const verifyToken = (req, res, next) => {
     const token = req.header('x-auth-token');
 
     if (!token) {
+        console.warn(`[AUTH] No token on ${req.method} ${req.originalUrl}`);
         return res.status(401).json({ msg: 'No token, authorization denied' });
     }
 
@@ -12,6 +13,7 @@ export const verifyToken = (req, res, next) => {
         req.user = decoded;
         next();
     } catch (err) {
-        res.status(401).json({ msg: 'Token is not valid' });
+        console.warn(`[AUTH] Token rejected on ${req.originalUrl}: ${err.name} - ${err.message}`);
+        res.status(401).json({ msg: 'Token is not valid', reason: err.name });
     }
 };

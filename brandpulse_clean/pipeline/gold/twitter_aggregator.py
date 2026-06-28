@@ -74,6 +74,39 @@ ON CONFLICT ON CONSTRAINT fact_intent_events_unique_content DO NOTHING;
 """
 
 
+# =====================================================
+# COMPLAINT SQL — writes to fact_complaint_events
+# =====================================================
+INSERT_TWEET_COMPLAINT_SQL = """
+INSERT INTO fact_complaint_events (
+    silver_content_id, model_id, platform_id, content_type_id,
+    complaint_id, date_id, time_id, complaint_score, request_id
+)
+SELECT
+    st.silver_tweet_id,
+    3,   -- Model: complaint classifier
+    2,   -- Platform: Twitter
+    3,   -- Content Type: Tweet
+    dc.complaint_id,
+    COALESCE(dd.date_id, 20251231),
+    COALESCE(dt.time_id, 1200),
+    st.complaint_score,
+    %s
+FROM silver_twitter_tweets_complaint st
+JOIN global_keywords gk ON gk.global_keyword_id = st.global_keyword_id
+JOIN dim_complaint dc ON dc.complaint_label = st.complaint_label
+LEFT JOIN dim_date dd ON dd.calendar_date = DATE(st.tweet_created_at)
+LEFT JOIN dim_time dt ON dt.time_id = (
+    EXTRACT(HOUR FROM st.tweet_created_at) * 100 +
+    EXTRACT(MINUTE FROM st.tweet_created_at)
+)
+WHERE st.global_keyword_id = %s
+  AND st.complaint_label IS NOT NULL
+  AND st.gold_processed = FALSE
+ON CONFLICT ON CONSTRAINT fact_complaint_events_unique_content DO NOTHING;
+"""
+
+
 def run_twitter_gold(keyword, request_id, mode='sentiment'):
     """
     Aggregate Silver Twitter data into Gold fact tables.
@@ -97,6 +130,17 @@ def run_twitter_gold(keyword, request_id, mode='sentiment'):
                     WHERE global_keyword_id = %s AND gold_processed = FALSE
                 """, (rid,))
                 print(f"[GOLD] Marked {cur.rowcount} intent silver tweets as gold_processed.")
+            elif mode == 'complaint':
+                cur.execute(INSERT_TWEET_COMPLAINT_SQL, (rid, rid))
+                tweets_inserted = cur.rowcount
+                print(f"[GOLD] Inserted {tweets_inserted} tweet complaint rows into fact_complaint_events.")
+
+                cur.execute("""
+                    UPDATE silver_twitter_tweets_complaint
+                    SET gold_processed = TRUE
+                    WHERE global_keyword_id = %s AND gold_processed = FALSE
+                """, (rid,))
+                print(f"[GOLD] Marked {cur.rowcount} complaint silver tweets as gold_processed.")
             else:
                 cur.execute(INSERT_TWEET_SENTIMENT_SQL, (rid, rid))
                 tweets_inserted = cur.rowcount

@@ -78,6 +78,22 @@ const Landing = () => {
                             <span className="mt-4 text-amber-600 font-medium text-sm inline-block">Classify intent →</span>
                         </Link>
 
+                        {/* Complaint Classification Card */}
+                        <Link
+                            to="/complaint-analysis"
+                            className="group p-6 rounded-2xl bg-gradient-to-br from-rose-50 to-red-100 border border-rose-200 hover:border-rose-400 hover:shadow-xl transition-all duration-300"
+                        >
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center text-rose-600">
+                                    <Shield className="w-6 h-6" />
+                                </div>
+                                <ArrowRight className="w-5 h-5 text-rose-600 group-hover:translate-x-1 transition-transform" />
+                            </div>
+                            <h3 className="font-bold text-lg text-gray-900">Complaint Classification</h3>
+                            <p className="text-gray-600 mt-2">Detect which posts are complaints vs non-complaints with AI</p>
+                            <span className="mt-4 text-rose-600 font-medium text-sm inline-block">Classify complaints →</span>
+                        </Link>
+
                         {/* History Card */}
                         <Link
                             to="/history"

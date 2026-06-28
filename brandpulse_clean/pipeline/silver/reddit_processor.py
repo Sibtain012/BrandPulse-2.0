@@ -155,10 +155,10 @@ def run_silver(request_id, batch_size=50, mode="sentiment"):
                 continue
 
             all_texts_to_score.append(post_text)
-            # Intent mode: only classify posts, not comments (TD-NEW-01)
+            # Intent/Complaint modes: only classify posts, not comments (TD-NEW-01).
             # Adding comment texts here would cause a score index mismatch
-            # because the intent persistence branch only consumes 1 score per doc.
-            if mode != AnalysisMode.INTENT.value:
+            # because those persistence branches only consume 1 score per doc.
+            if mode not in (AnalysisMode.INTENT.value, AnalysisMode.COMPLAINT.value):
                 all_texts_to_score.extend([clean_reddit_text(c.get("body", "")) for c in eligible_comments])
 
             doc_mapping.append({
@@ -183,6 +183,9 @@ def run_silver(request_id, batch_size=50, mode="sentiment"):
         if mode == AnalysisMode.INTENT.value:
             from pipeline.silver.intent import run_intent_batch
             all_scores = run_intent_batch(all_texts_to_score)
+        elif mode == AnalysisMode.COMPLAINT.value:
+            from pipeline.silver.complaint import run_complaint_batch
+            all_scores = run_complaint_batch(all_texts_to_score)
         else:
             all_scores = run_sentiment_batch(all_texts_to_score)
     except Exception as e:
@@ -239,6 +242,36 @@ def run_silver(request_id, batch_size=50, mode="sentiment"):
                     )
                 )
                 # No comments in intent mode — documented as TD-NEW-01
+                processed_mongo_ids.append(raw_doc["_id"])
+            elif mode == AnalysisMode.COMPLAINT.value:
+                # ========== COMPLAINT BRANCH: write to silver_reddit_posts_complaint ==========
+                cursor_pg.execute(
+                    """
+                    INSERT INTO silver_reddit_posts_complaint (
+                        original_bronze_id, platform, keyword, global_keyword_id,
+                        post_id, title_clean, body_clean, author_hash,
+                        subreddit_name, post_url, post_score, upvote_ratio,
+                        total_comments, complaint_label, complaint_score,
+                        created_at_utc, processed_at_utc, model_id
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (original_bronze_id, global_keyword_id) DO NOTHING
+                    """,
+                    (
+                        str(raw_doc["_id"]), "reddit", item["keyword"], rid,
+                        post_id_val,
+                        item["title_clean"], item["body_clean"], hash_author(post.get("author")),
+                        _resolve_subreddit_name(post, raw_doc),
+                        _resolve_post_url(post, post_id_val),
+                        post.get("score", 0),
+                        post.get("upvote_ratio", 0), post.get("num_comments", 0),
+                        post_classification["label"], post_classification["score"],
+                        datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc),
+                        datetime.now(timezone.utc),
+                        3  # model_id = 3 (complaint classifier)
+                    )
+                )
+                # No comments in complaint mode (mirrors intent TD-NEW-01)
                 processed_mongo_ids.append(raw_doc["_id"])
             else:
                 # ========== SENTIMENT BRANCH: original code, unchanged ==========

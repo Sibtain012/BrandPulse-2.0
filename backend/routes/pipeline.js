@@ -362,6 +362,107 @@ async function saveIntentAnalysisToHistory(
   }
 }
 
+// ============================================================
+// NEW: Complaint analysis history saver
+// ============================================================
+async function saveComplaintAnalysisToHistory(
+  requestId,
+  keyword,
+  userId,
+  startDate,
+  endDate,
+  platformId,
+) {
+  try {
+    console.log(
+      `[History] Saving complaint analysis for Request ID: ${requestId}`,
+    );
+
+    const silverTable =
+      platformId === 2
+        ? "silver_twitter_tweets_complaint"
+        : "silver_reddit_posts_complaint";
+
+    const result = await pool.query(
+      `
+      SELECT
+          COUNT(*)::INT AS total,
+          COUNT(*) FILTER (WHERE complaint_label = 'Complaint')     AS complaint_count,
+          COUNT(*) FILTER (WHERE complaint_label = 'Non-Complaint') AS non_complaint_count,
+          AVG(complaint_score) AS avg_score
+      FROM ${silverTable}
+      WHERE global_keyword_id = $1
+      `,
+      [requestId],
+    );
+
+    const data = result.rows[0];
+    const total = parseInt(data.total) || 0;
+
+    if (total === 0) {
+      console.log(
+        `[History] No complaint data for Request ID: ${requestId}, skipping`,
+      );
+      return;
+    }
+
+    const complaintCounts = {
+      Complaint: parseInt(data.complaint_count) || 0,
+      "Non-Complaint": parseInt(data.non_complaint_count) || 0,
+    };
+
+    const dominant =
+      complaintCounts.Complaint >= complaintCounts["Non-Complaint"]
+        ? "Complaint"
+        : "Non-Complaint";
+
+    const avgScore = parseFloat(data.avg_score) || 0;
+
+    // Reuse existing intent columns (dominant_intent / intent_distribution) to
+    // store complaint summary — analysis_mode='complaint' distinguishes the row.
+    await pool.query(
+      `
+      INSERT INTO analysis_history (
+          keyword, user_id, start_date, end_date,
+          total_posts, total_comments,
+          avg_sentiment_score,
+          request_id, platform_id, analysis_mode,
+          dominant_intent, intent_distribution
+      ) VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8, 'complaint', $9, $10)
+      ON CONFLICT ON CONSTRAINT analysis_history_user_mode_unique
+      DO UPDATE SET
+          total_posts = EXCLUDED.total_posts,
+          avg_sentiment_score = EXCLUDED.avg_sentiment_score,
+          dominant_intent = EXCLUDED.dominant_intent,
+          intent_distribution = EXCLUDED.intent_distribution,
+          analysis_timestamp = CURRENT_TIMESTAMP
+      `,
+      [
+        keyword,
+        userId,
+        startDate,
+        endDate,
+        total,
+        avgScore,
+        requestId,
+        platformId,
+        dominant,
+        JSON.stringify(complaintCounts),
+      ],
+    );
+
+    console.log(
+      `[History] Saved complaint analysis for Request ID: ${requestId} (${total} items, dominant: ${dominant})`,
+    );
+  } catch (error) {
+    console.error(
+      "[History] Error saving complaint analysis_history:",
+      error.message,
+    );
+    throw error;
+  }
+}
+
 // NEW: Polling Route for React Hook
 router.get("/status/id/:requestId", async (req, res) => {
   try {
@@ -390,7 +491,7 @@ router.post("/analyze", async (req, res) => {
   const platform = (rawPlatform || "reddit").toString().toLowerCase();
   const mode = (rawMode || "sentiment").toString().toLowerCase();
   const PLATFORM_IDS = { reddit: 1, twitter: 2 };
-  const VALID_MODES = ["sentiment", "intent"];
+  const VALID_MODES = ["sentiment", "intent", "complaint"];
   if (!(platform in PLATFORM_IDS)) {
     return res.status(400).json({ error: `Unsupported platform: ${platform}` });
   }
@@ -566,7 +667,16 @@ router.post("/analyze", async (req, res) => {
 
         // Save results to analysis_history (route by platform AND mode)
         try {
-          if (mode === "intent") {
+          if (mode === "complaint") {
+            await saveComplaintAnalysisToHistory(
+              requestId,
+              keyword,
+              user_id,
+              finalStartDate,
+              finalEndDate,
+              platformId,
+            );
+          } else if (mode === "intent") {
             await saveIntentAnalysisToHistory(
               requestId,
               keyword,

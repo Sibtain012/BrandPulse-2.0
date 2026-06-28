@@ -57,3 +57,12 @@ INTENT_MODEL: str = os.getenv(
     "INTENT_MODEL",
     "ibrahimtime/bertweet-intent-classifier-v2",
 )
+
+# ---------------------------------------------------------------------------
+# Complaint Model
+# ---------------------------------------------------------------------------
+# Override via COMPLAINT_MODEL env var without code changes.
+COMPLAINT_MODEL: str = os.getenv(
+    "COMPLAINT_MODEL",
+    "ibrahimtime/complaint-classifier-v2",
+)

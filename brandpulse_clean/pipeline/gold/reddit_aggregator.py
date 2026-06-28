@@ -116,6 +116,36 @@ ON CONFLICT ON CONSTRAINT fact_intent_events_unique_content DO NOTHING;
 
 
 # =====================================================
+# COMPLAINT SQL — writes to fact_complaint_events
+# =====================================================
+INSERT_POST_COMPLAINT_SQL = """
+INSERT INTO fact_complaint_events (
+    silver_content_id, model_id, platform_id, content_type_id,
+    complaint_id, date_id, time_id, complaint_score, request_id
+)
+SELECT
+    sp.silver_post_id,
+    3,    -- Model: complaint classifier
+    1,    -- Platform: Reddit
+    1,    -- Content Type: Post
+    dc.complaint_id,
+    COALESCE(dd.date_id, 20251231),
+    COALESCE(dt.time_id, 1200),
+    sp.complaint_score,
+    %s
+FROM silver_reddit_posts_complaint sp
+JOIN global_keywords gk ON gk.global_keyword_id = sp.global_keyword_id
+JOIN dim_complaint dc ON dc.complaint_label = sp.complaint_label
+LEFT JOIN dim_date dd ON dd.calendar_date = DATE(sp.created_at_utc)
+LEFT JOIN dim_time dt ON dt.time_id = (EXTRACT(HOUR FROM sp.created_at_utc) * 100 + EXTRACT(MINUTE FROM sp.created_at_utc))
+WHERE sp.global_keyword_id = %s
+  AND sp.complaint_label IS NOT NULL
+  AND sp.gold_processed = FALSE
+ON CONFLICT ON CONSTRAINT fact_complaint_events_unique_content DO NOTHING;
+"""
+
+
+# =====================================================
 # MAIN FUNCTION — mode-aware
 # =====================================================
 
@@ -146,6 +176,18 @@ def run_reddit_gold(keyword, request_id, mode='sentiment'):
                     WHERE global_keyword_id = %s AND gold_processed = FALSE
                 """, (request_id,))
                 print(f"[GOLD] Marked {cur.rowcount} intent silver posts as gold_processed.")
+            elif mode == 'complaint':
+                # COMPLAINT: posts only, separate fact table
+                cur.execute(INSERT_POST_COMPLAINT_SQL, (request_id, request_id))
+                posts_inserted = cur.rowcount
+                print(f"[GOLD] Inserted {posts_inserted} post complaint rows into fact_complaint_events.")
+
+                cur.execute("""
+                    UPDATE silver_reddit_posts_complaint
+                    SET gold_processed = TRUE
+                    WHERE global_keyword_id = %s AND gold_processed = FALSE
+                """, (request_id,))
+                print(f"[GOLD] Marked {cur.rowcount} complaint silver posts as gold_processed.")
             else:
                 # SENTIMENT: original code, unchanged
                 # 1. Insert POSTS into fact table

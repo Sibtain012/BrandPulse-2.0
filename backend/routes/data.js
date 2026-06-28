@@ -558,4 +558,121 @@ router.get("/trend/:requestId", verifyToken, async (req, res) => {
   }
 });
 
+// ============================================================
+// COMPLAINT RESULTS — reads from silver complaint tables
+// ============================================================
+router.get("/complaint/results/:requestId", async (req, res) => {
+  try {
+    const rid = parseInt(req.params.requestId);
+    const platform = (req.query.platform || "reddit").toString().toLowerCase();
+    console.log(
+      `[API] Fetching complaint results for Request ID: ${rid} (platform: ${platform})`,
+    );
+
+    const table =
+      platform === "twitter"
+        ? "silver_twitter_tweets_complaint"
+        : "silver_reddit_posts_complaint";
+
+    const result = await pool.query(
+      `
+      SELECT complaint_label AS name, COUNT(*)::INT AS value
+      FROM ${table}
+      WHERE global_keyword_id = $1
+      GROUP BY complaint_label
+      ORDER BY complaint_label ASC
+      `,
+      [rid],
+    );
+
+    const total = result.rows.reduce((sum, r) => sum + r.value, 0);
+
+    res.json({
+      posts: result.rows,
+      comments: [],
+      totals: { posts: total, comments: 0, total },
+      platform,
+      analysisMode: "complaint",
+    });
+  } catch (err) {
+    console.error("Complaint results fetch failed:", err.message);
+    res.status(500).json({ error: "Complaint results fetch failed" });
+  }
+});
+
+// ============================================================
+// COMPLAINT DETAILS — reads individual items from silver complaint tables
+// ============================================================
+router.get("/complaint/details/:requestId", async (req, res) => {
+  try {
+    const rid = parseInt(req.params.requestId);
+    const platform = (req.query.platform || "reddit").toString().toLowerCase();
+    console.log(
+      `[API] Fetching complaint details for Request ID: ${rid} (platform: ${platform})`,
+    );
+
+    if (platform === "twitter") {
+      const tweetsResult = await pool.query(
+        `
+        SELECT
+            silver_tweet_id AS id,
+            tweet_id,
+            text_clean AS body,
+            tweet_url AS url,
+            favorite_count AS score,
+            retweet_count,
+            reply_count,
+            quote_count,
+            complaint_label AS intent,
+            complaint_score AS confidence,
+            tweet_created_at AS created_at
+        FROM silver_twitter_tweets_complaint
+        WHERE global_keyword_id = $1
+        ORDER BY favorite_count DESC
+        LIMIT 100
+        `,
+        [rid],
+      );
+
+      return res.json({
+        posts: [],
+        comments: [],
+        tweets: tweetsResult.rows,
+        platform: "twitter",
+        analysisMode: "complaint",
+      });
+    }
+
+    const postsResult = await pool.query(
+      `
+      SELECT
+          silver_post_id AS id,
+          title_clean AS title,
+          body_clean AS body,
+          subreddit_name AS subreddit,
+          post_score AS score,
+          complaint_label AS intent,
+          complaint_score AS confidence,
+          post_url AS url,
+          created_at_utc AS created_at
+      FROM silver_reddit_posts_complaint
+      WHERE global_keyword_id = $1
+      ORDER BY post_score DESC
+      LIMIT 50
+      `,
+      [rid],
+    );
+
+    res.json({
+      posts: postsResult.rows,
+      comments: [],
+      platform: "reddit",
+      analysisMode: "complaint",
+    });
+  } catch (err) {
+    console.error("Complaint details fetch failed:", err.message);
+    res.status(500).json({ error: "Complaint details fetch failed" });
+  }
+});
+
 export default router;

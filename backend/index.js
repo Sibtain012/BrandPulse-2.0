@@ -6,6 +6,8 @@ import pool, { getDBstatus } from "./db.js";
 import authRouter from "./routes/auth.js";
 import pipelineRouter from "./routes/pipeline.js"; // The Python Trigger logic
 import dataRouter from "./routes/data.js"; // The Gold Layer Data logic
+import anomalyRouter from "./routes/anomaly.js"; // Z-score anomaly detection
+import cooccurrenceRouter from "./routes/cooccurrence.js"; // PMI keyword co-occurrence
 
 const app = express();
 
@@ -19,6 +21,8 @@ app.use(cors());
 app.use("/api/auth", authRouter);
 app.use("/api/pipeline", pipelineRouter);
 app.use("/api/data", dataRouter);
+app.use("/api/anomaly", anomalyRouter);
+app.use("/api/cooccurrence", cooccurrenceRouter);
 
 // ==========================================
 // SELF-HEALING MAINTENANCE (Interval)

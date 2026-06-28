@@ -136,3 +136,26 @@ _INTENT_DIM_IDS = {
 class AnalysisMode(str, Enum):
     SENTIMENT = "sentiment"
     INTENT = "intent"
+    COMPLAINT = "complaint"
+
+
+# ---------------------------------------------------------------------------
+# Complaint Label — matches dim_complaint rows exactly
+# IDs mirror dim_complaint.complaint_id in PostgreSQL:
+#   Complaint     → 1
+#   Non-Complaint → 2
+# ---------------------------------------------------------------------------
+class ComplaintLabel(str, Enum):
+    COMPLAINT = "Complaint"
+    NON_COMPLAINT = "Non-Complaint"
+
+    @property
+    def dim_id(self) -> int:
+        """Return the corresponding dim_complaint.complaint_id."""
+        return _COMPLAINT_DIM_IDS[self]
+
+
+_COMPLAINT_DIM_IDS = {
+    ComplaintLabel.COMPLAINT: 1,
+    ComplaintLabel.NON_COMPLAINT: 2,
+}

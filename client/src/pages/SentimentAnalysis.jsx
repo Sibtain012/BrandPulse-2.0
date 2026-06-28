@@ -6,6 +6,8 @@ import axios from 'axios';
 import { getCurrentUserId } from '../utils/auth';
 import Header from '../components/Header';
 import TrendChart from '../components/TrendChart';
+import AnomalyOverlay from '../components/AnomalyOverlay';
+import CooccurrenceChart from '../components/CooccurrenceChart';
 
 // Sentiment badge component
 const SentimentBadge = ({ sentiment, confidence }) => {
@@ -423,6 +425,24 @@ const SentimentAnalysis = () => {
                             >
                                 📈 Trends
                             </button>
+                            <button
+                                onClick={() => setActiveTab('anomalies')}
+                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'anomalies'
+                                    ? 'text-brand-600 border-b-2 border-brand-600'
+                                    : 'text-light-500 hover:text-light-700'
+                                    }`}
+                            >
+                                🚨 Anomalies
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('cooccurrence')}
+                                className={`px-6 py-3 font-medium text-sm transition-colors whitespace-nowrap ${activeTab === 'cooccurrence'
+                                    ? 'text-brand-600 border-b-2 border-brand-600'
+                                    : 'text-light-500 hover:text-light-700'
+                                    }`}
+                            >
+                                🔗 Co-occurrence
+                            </button>
                         </div>
 
                         {/* Tab Content */}
@@ -561,6 +581,20 @@ const SentimentAnalysis = () => {
                             <TrendChart
                                 requestId={historicalRequestId || activeRequestId}
                                 platform={platform}
+                            />
+                        )}
+
+                        {activeTab === 'anomalies' && (
+                            <AnomalyOverlay
+                                requestId={historicalRequestId || activeRequestId}
+                                threshold={2.0}
+                            />
+                        )}
+
+                        {activeTab === 'cooccurrence' && (
+                            <CooccurrenceChart
+                                requestId={historicalRequestId || activeRequestId}
+                                keyword={keyword}
                             />
                         )}
 
